@@ -382,77 +382,130 @@ function Clients() {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", city: "", lawyer: "أحمد العلي" });
-  const [clients, setClients] = useState(CLIENTS);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState("");
+
+  // Charger les clients depuis Supabase au démarrage
+  useEffect(() => {
+    db.get("clients").then(data => {
+      if (Array.isArray(data)) setClients(data);
+      setLoading(false);
+    });
+  }, []);
 
   const filtered = clients.filter(c =>
-    c.name.includes(search) || c.email.includes(search) || c.city.includes(search)
+    c.name?.includes(search) || c.city?.includes(search)
   );
 
-  const add = () => {
+  const add = async () => {
     if (!form.name) return;
-    setClients([...clients, { id: Date.now(), ...form, status: "نشط", cases: 0, since: "ديسمبر 2024" }]);
+    const result = await db.post("clients", {
+      ...form,
+      cases: 0,
+      since: new Date().getFullYear().toString()
+    });
+    if (Array.isArray(result) && result[0]) {
+      setClients([result[0], ...clients]);
+      setToast("✅ تم إضافة العميل بنجاح");
+      setTimeout(() => setToast(""), 3000);
+    }
     setShowAdd(false);
     setForm({ name: "", email: "", phone: "", city: "", lawyer: "أحمد العلي" });
   };
 
+  const remove = async (id) => {
+    await db.del("clients", id);
+    setClients(clients.filter(c => c.id !== id));
+    setToast("تم حذف العميل");
+    setTimeout(() => setToast(""), 3000);
+  };
+
   return (
     <div>
+      {/* Toast notification */}
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16A34A", color: "#fff", padding: "12px 24px", borderRadius: 12, fontSize: 14, fontWeight: 700, zIndex: 9999 }}>
+          {toast}
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
         <Btn onClick={() => setShowAdd(true)}>+ إضافة عميل</Btn>
         <div>
           <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.text }}>العملاء</h2>
-          <p style={{ margin: "3px 0 0", color: C.textLight, fontSize: 13 }}>{filtered.length} عميل</p>
+          <p style={{ margin: "3px 0 0", color: C.textLight, fontSize: 13 }}>
+            {loading ? "جاري التحميل..." : `${filtered.length} عميل · محفوظ في Supabase`}
+          </p>
         </div>
       </div>
 
       <Card style={{ overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "flex-end" }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍  البحث عن عميل..."
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="🔍  البحث عن عميل..."
             style={{ padding: "8px 14px", borderRadius: 9, border: `1.5px solid ${C.border}`, fontSize: 13.5, width: 280, outline: "none", textAlign: "right", fontFamily: "Tajawal, sans-serif" }} />
         </div>
 
-        <table style={{ width: "100%", borderCollapse: "collapse", direction: "rtl" }}>
-          <thead>
-            <tr style={{ background: C.n100 }}>
-              {["العميل", "التواصل", "المدينة", "المحامي المكلف", "عدد القضايا", "الحالة", ""].map((h, i) => (
-                <th key={i} style={{ padding: "10px 18px", textAlign: "right", fontSize: 11, fontWeight: 700, color: C.textLight, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((c, i) => (
-              <tr key={c.id} style={{ borderTop: `1px solid ${C.border}` }}>
-                <td style={{ padding: "13px 18px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexDirection: "row-reverse" }}>
-                    <Avatar name={c.name} size={36} bg={i % 2 === 0 ? C.primary : C.teal} />
-                    <div style={{ textAlign: "right" }}>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 13.5, color: C.text }}>{c.name}</p>
-                      <p style={{ margin: 0, fontSize: 11.5, color: C.textLight }}>منذ {c.since}</p>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding: "13px 18px", textAlign: "right" }}>
-                  <p style={{ margin: 0, fontSize: 12.5, color: C.text }}>{c.phone}</p>
-                  <p style={{ margin: 0, fontSize: 11.5, color: C.textLight }}>{c.email}</p>
-                </td>
-                <td style={{ padding: "13px 18px", fontSize: 13.5, color: C.textMid, textAlign: "right" }}>{c.city}</td>
-                <td style={{ padding: "13px 18px", fontSize: 13, color: C.textMid, textAlign: "right" }}>{c.lawyer}</td>
-                <td style={{ padding: "13px 18px", fontSize: 15, fontWeight: 800, color: C.text, textAlign: "center" }}>{c.cases}</td>
-                <td style={{ padding: "13px 18px", textAlign: "right" }}><Badge label={c.status} /></td>
-                <td style={{ padding: "13px 18px" }}>
-                  <Btn sm variant="ghost">عرض</Btn>
-                </td>
+        {loading ? (
+          <div style={{ padding: 50, textAlign: "center", color: C.textLight }}>
+            <p style={{ fontSize: 32 }}>⏳</p>
+            <p style={{ fontSize: 14 }}>جاري تحميل العملاء من Supabase...</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 50, textAlign: "center", color: C.textLight }}>
+            <p style={{ fontSize: 32 }}>👥</p>
+            <p style={{ fontSize: 14 }}>لا يوجد عملاء. أضف أول عميل!</p>
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", direction: "rtl" }}>
+            <thead>
+              <tr style={{ background: C.n100 }}>
+                {["العميل", "التواصل", "المدينة", "المحامي المكلف", "الحالة", ""].map((h, i) => (
+                  <th key={i} style={{ padding: "10px 18px", textAlign: "right", fontSize: 11, fontWeight: 700, color: C.textLight }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((c, i) => (
+                <tr key={c.id} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "13px 18px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexDirection: "row-reverse" }}>
+                      <Avatar name={c.name} size={36} bg={i % 2 === 0 ? C.primary : C.teal} />
+                      <div style={{ textAlign: "right" }}>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13.5, color: C.text }}>{c.name}</p>
+                        <p style={{ margin: 0, fontSize: 11.5, color: C.textLight }}>منذ {c.since}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ padding: "13px 18px", textAlign: "right" }}>
+                    <p style={{ margin: 0, fontSize: 12.5 }}>{c.phone}</p>
+                    <p style={{ margin: 0, fontSize: 11.5, color: C.textLight }}>{c.email}</p>
+                  </td>
+                  <td style={{ padding: "13px 18px", fontSize: 13, color: C.textMid, textAlign: "right" }}>{c.city}</td>
+                  <td style={{ padding: "13px 18px", fontSize: 13, color: C.textMid, textAlign: "right" }}>{c.lawyer}</td>
+                  <td style={{ padding: "13px 18px", textAlign: "right" }}><Badge label={c.status} /></td>
+                  <td style={{ padding: "13px 18px" }}>
+                    <button onClick={() => remove(c.id)}
+                      style={{ background: "#FEF2F2", border: "none", color: "#DC2626", padding: "5px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "Tajawal, sans-serif" }}>
+                      حذف
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
 
       {showAdd && (
         <Modal title="إضافة عميل جديد" onClose={() => setShowAdd(false)}>
           <div style={{ direction: "rtl" }}>
+            <div style={{ background: "#EFF6FF", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#1D4ED8", textAlign: "right" }}>
+              💾 سيتم الحفظ مباشرة في قاعدة بيانات Supabase
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Inp label="الاسم الكامل" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="اسم العميل" />
+              <Inp label="الاسم الكامل *" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="اسم العميل" />
               <Inp label="رقم الهاتف" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+966" />
             </div>
             <Inp label="البريد الإلكتروني" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="example@email.com" />
@@ -461,7 +514,7 @@ function Clients() {
               <Sel label="المحامي المكلف" value={form.lawyer} onChange={e => setForm({ ...form, lawyer: e.target.value })} options={["أحمد العلي", "فاطمة السيد", "خالد العمري"]} />
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 8, flexDirection: "row-reverse" }}>
-              <Btn onClick={add} full>حفظ العميل</Btn>
+              <Btn onClick={add} full>💾 حفظ في Supabase</Btn>
               <Btn variant="secondary" onClick={() => setShowAdd(false)} full>إلغاء</Btn>
             </div>
           </div>
