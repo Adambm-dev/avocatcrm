@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+const SUPABASE_URL = "https://uomsnwpjsjkwkxzbgbkg.supabase.co";
+const SUPABASE_KEY = "sb_publishable_KGf7VXsyZar9jYgSnzTFLg_IY6wZyB3";
 
 /* ═══════════════════════════════════════════
    COULEURS & DESIGN
