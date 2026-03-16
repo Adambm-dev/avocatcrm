@@ -42,14 +42,28 @@ const db = {
    COULEURS
 ═══════════════════════════════════════════ */
 const C = {
-  primary: "#1E3A5F", primaryMid: "#2D5282", primaryLight: "#3B6CB0",
-  accent: "#C9A84C", teal: "#0D9488", tealBg: "#F0FDFA",
-  rose: "#DC2626", roseBg: "#FEF2F2",
-  amber: "#D97706", amberBg: "#FFFBEB",
-  green: "#16A34A", greenBg: "#F0FDF4",
-  white: "#FFFFFF", bg: "#F1F5F9", border: "#E2E8F0",
-  text: "#0F172A", textMid: "#475569", textLight: "#94A3B8",
-  n100: "#F8FAFC", n200: "#F1F5F9",
+  primary: "#4A1528",
+  primaryMid: "#6B2D3E",
+  primaryLight: "#8B4D5E",
+  accent: "#C9A84C",
+  accentLight: "#E2C97A",
+  accentBg: "#FDF6E3",
+  teal: "#6B2D3E",
+  tealBg: "#FDF0F3",
+  rose: "#C0392B",
+  roseBg: "#FDECEA",
+  amber: "#D97706",
+  amberBg: "#FFFBEB",
+  green: "#16A34A",
+  greenBg: "#F0FDF4",
+  white: "#FFFFFF",
+  bg: "#FAF7F5",
+  border: "#E8DDD8",
+  text: "#1C0A0A",
+  textMid: "#5C3D3D",
+  textLight: "#A08080",
+  n100: "#FDF9F7",
+  n200: "#F5EDE8",
 };
 
 const NAV = [
@@ -205,7 +219,7 @@ function Dashboard({ setNav, counts }) {
   return (
     <div>
       <div style={{ marginBottom: 26, textAlign: "right" }}>
-        <h2 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: C.text }}>مرحباً، المحامي أحمد 👋</h2>
+        <h2 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: C.text }}>Bonjour, Maître Laadhar ⚖️</h2>
         <p style={{ margin: "4px 0 0", color: C.textLight, fontSize: 14 }}>جميع البيانات محفوظة في Supabase ✅</p>
       </div>
 
@@ -989,8 +1003,8 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ width: 38, height: 38, borderRadius: 11, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>⚖️</div>
               <div>
-                <p style={{ margin: 0, color: C.white, fontWeight: 800, fontSize: 16 }}>محامي برو</p>
-                <p style={{ margin: 0, color: "rgba(255,255,255,0.4)", fontSize: 10 }}>نظام إدارة المكاتب</p>
+                <p style={{ margin: 0, color: C.white, fontWeight: 800, fontSize: 15 }}>Cabinet CML</p>
+                <p style={{ margin: 0, color: C.accent, fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>Mondher Laadhar</p>
               </div>
             </div>
           </div>
@@ -1020,8 +1034,8 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Avatar name="أحمد العلي" size={34} bg={C.accent} />
               <div>
-                <p style={{ margin: 0, color: C.white, fontSize: 13, fontWeight: 700 }}>أحمد محمد العلي</p>
-                <p style={{ margin: 0, color: "rgba(255,255,255,0.4)", fontSize: 11 }}>المحامي الرئيسي</p>
+               <p style={{ margin: 0, color: C.white, fontSize: 13, fontWeight: 700 }}>Mondher Laadhar</p>
+               <p style={{ margin: 0, color: C.accent, fontSize: 11, fontWeight: 600 }}>Avocat • محامٍ</p>
               </div>
             </div>
           </div>
@@ -1035,7 +1049,7 @@ export default function App() {
               <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{NAV.find(n => n.id === nav)?.label}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 11, background: C.greenBg, color: C.green, padding: "3px 10px", borderRadius: 20, fontWeight: 700 }}>🔗 Supabase ✅</span>
+              <span style={{ fontSize: 11, background: C.accentBg, color: C.accent, padding: "3px 12px", borderRadius: 20, fontWeight: 700, border: `1px solid ${C.accent}` }}>Cabinet CML ⚖️</span>
               <Avatar name="أحمد العلي" size={34} bg={C.primary} />
             </div>
           </div>
