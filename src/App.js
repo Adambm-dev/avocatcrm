@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 const SUPABASE_URL = "https://uomsnwpjsjkwkxzbgbkg.supabase.co";
 const SUPABASE_KEY = "sb_publishable_KGf7VXsyZar9jYgSnzTFLg_IY6wZyB3";
 const db = {
