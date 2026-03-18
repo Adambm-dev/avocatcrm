@@ -1401,15 +1401,21 @@ export default function App() {
   const handleLogin = async (t, user) => {
     localStorage.setItem("cml_token", t);
     setToken(t);
-    // Charger le rôle depuis user_roles
     setLoadingRole(true);
+    // Vérification admin fixe
+    if (user.email === "admin@admin.com") {
+      setUserRole("admin");
+      setNav("access");
+      setLoadingRole(false);
+      return;
+    }
+    // Charger le rôle depuis user_roles
     const roles = await db.get("user_roles", t, `&email=eq.${encodeURIComponent(user.email)}`);
     if (Array.isArray(roles) && roles[0]) {
       setUserRole(roles[0].role);
-      // Redirect admin to access page
       if (roles[0].role === "admin") setNav("access");
     } else {
-      setUserRole("lawyer"); // par défaut
+      setUserRole("lawyer");
     }
     setLoadingRole(false);
   };
