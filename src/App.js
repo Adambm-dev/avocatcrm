@@ -50,11 +50,11 @@ const db = {
    RÔLES & PERMISSIONS
 ══════════════════════════════════════════ */
 const ROLES = {
-  admin:                 { label: "مدير", color: "#4A1528", pages: ["settings", "access", "assignments"] },
-  lawyer:                { label: "محامٍ", color: "#C9A84C", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
-  collaborator:          { label: "متعاون", color: "#0D9488", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
-  secretary_lawyer:      { label: "سكرتير محامٍ", color: "#7C3AED", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
-  secretary_collaborator:{ label: "سكرتير متعاون", color: "#D97706", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
+  admin:                 { label: "مدير",            color: "#4A1528", pages: ["settings","access","assignments"] },
+  lawyer:                { label: "محامٍ",            color: "#C9A84C", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
+  collaborator:          { label: "متعاون",           color: "#0D9488", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
+  secretary_lawyer:      { label: "سكرتير محامٍ",     color: "#7C3AED", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
+  secretary_collaborator:{ label: "سكرتير متعاون",    color: "#D97706", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
 };
 
 const canAccess = (role, page) => ROLES[role]?.pages.includes(page) ?? false;
@@ -217,15 +217,14 @@ function LoginPage({ onLogin }) {
 /* ══════════════════════════════════════════
    DASHBOARD
 ══════════════════════════════════════════ */
-function Dashboard({ setNav, token, identity }) {
+function Dashboard({ setNav, token }) {
   const [stats, setStats] = useState({ clients: 0, cases: 0, apts: 0 });
   const [recentCases, setRecentCases] = useState([]);
   const [upcomingApts, setUpcomingApts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = identity ? `&lawyer=eq.${encodeURIComponent(identity)}` : "";
-    Promise.all([db.get("clients", token, q), db.get("cases", token, q), db.get("appointments", token, q)]).then(([cl, ca, ap]) => {
+    Promise.all([db.get("clients", token), db.get("cases", token), db.get("appointments", token)]).then(([cl, ca, ap]) => {
       setStats({
         clients: Array.isArray(cl) ? cl.length : 0,
         cases: Array.isArray(ca) ? ca.filter(c => !["مغلقة","مكسوبة"].includes(c.status)).length : 0,
@@ -235,7 +234,7 @@ function Dashboard({ setNav, token, identity }) {
       setUpcomingApts(Array.isArray(ap) ? ap.filter(a => a.status !== "ملغي").slice(0, 4) : []);
       setLoading(false);
     });
-  }, [token, identity]);
+  }, [token]);
 
   if (loading) return <Spinner />;
 
@@ -247,11 +246,11 @@ function Dashboard({ setNav, token, identity }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
         {[
-          { label: "إجمالي العملاء", value: stats.clients, icon: "👥", color: C.p, nav: "clients" },
-          { label: "القضايا النشطة", value: stats.cases, icon: "⚖️", color: C.amber, nav: "cases" },
-          { label: "مواعيد قادمة", value: stats.apts, icon: "📅", color: C.green, nav: "calendar" },
+          { label: "إجمالي العملاء", value: stats.clients, icon: "👥", color: C.p },
+          { label: "القضايا النشطة", value: stats.cases, icon: "⚖️", color: C.amber },
+          { label: "مواعيد قادمة", value: stats.apts, icon: "📅", color: C.green },
         ].map((k, i) => (
-          <Card key={i} style={{ padding: "20px 22px", borderTop: `4px solid ${k.color}`, cursor: "pointer" }} onClick={() => setNav(k.nav)}>
+          <Card key={i} style={{ padding: "20px 22px", borderTop: `4px solid ${k.color}`, cursor: "pointer" }} onClick={() => setNav(["clients","cases","calendar"][i])}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <div>
                 <p style={{ margin: 0, fontSize: 11, color: C.textLight, fontWeight: 700 }}>{k.label}</p>
@@ -309,118 +308,156 @@ function Dashboard({ setNav, token, identity }) {
 }
 
 /* ══════════════════════════════════════════
-   CLIENTS
+   CLIENTS — avec gestion des fichiers
 ══════════════════════════════════════════ */
-function Clients({ token, identity }) {
-  const [search, setSearch] = useState(""); const [showAdd, setShowAdd] = useState(false);
-  const [clients, setClients] = useState([]); const [loading, setLoading] = useState(true);
+const DOC_TYPES = ["بطاقة هوية (CIN)","جواز سفر","رخصة سياقة","عقد","وثيقة قضائية","إشعار","تصريح","أخرى"];
+
+function ClientDetail({ client, token, onBack, onDelete }) {
+  const [docs, setDocs] = useState([]);
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [showDocForm, setShowDocForm] = useState(false);
+  const [docForm, setDocForm] = useState({ name: "", doc_type: "بطاقة هوية (CIN)", url: "", notes: "" });
   const [tm, tt, show] = useToast();
-  const [form, setForm] = useState({ name: "", email: "", phone: "", city: "", lawyer: identity });
-  const [editClient, setEditClient] = useState(null);
 
   useEffect(() => {
-    const q = identity ? `&lawyer=eq.${encodeURIComponent(identity)}` : "";
-    db.get("clients", token, q).then(d => { if (Array.isArray(d)) setClients(d); setLoading(false); });
-  }, [token, identity]);
+    db.get("client_documents", token, `&client_id=eq.${client.id}`).then(d => {
+      if (Array.isArray(d)) setDocs(d);
+      setLoadingDocs(false);
+    });
+  }, [client.id]);
+
+  const addDoc = async () => {
+    if (!docForm.name) return;
+    const res = await db.post("client_documents", { client_id: client.id, ...docForm, uploaded_at: new Date().toISOString() }, token);
+    if (Array.isArray(res) && res[0]) { setDocs([res[0], ...docs]); show("✅ تم إضافة الوثيقة"); }
+    setShowDocForm(false); setDocForm({ name: "", doc_type: "بطاقة هوية (CIN)", url: "", notes: "" });
+  };
+
+  const removeDoc = async (id) => { await db.del("client_documents", id, token); setDocs(docs.filter(d => d.id !== id)); show("تم حذف الوثيقة"); };
+
+  const docTypeIcon = { "بطاقة هوية (CIN)":"🪪","جواز سفر":"📕","رخصة سياقة":"🚗","عقد":"📋","وثيقة قضائية":"⚖️","إشعار":"📩","تصريح":"📜","أخرى":"📎" };
+
+  return (
+    <div style={{ direction: "rtl" }}>
+      <Toast msg={tm} type={tt} />
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: C.pl, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif", marginBottom: 18 }}>← العودة إلى قائمة العملاء</button>
+
+      {/* Header */}
+      <Card style={{ padding: "22px 26px", marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => { if (window.confirm(`حذف العميل "${client.name}"؟`)) onDelete(client.id); }}
+              style={{ background: C.roseBg, border: "none", color: C.rose, padding: "8px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>🗑 حذف العميل</button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ textAlign: "right" }}>
+              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: C.text }}>{client.name}</h2>
+              <div style={{ display: "flex", gap: 12, marginTop: 5, flexWrap: "wrap" }}>
+                {client.phone && <span style={{ fontSize: 13, color: C.textMid }}>📞 {client.phone}</span>}
+                {client.email && <span style={{ fontSize: 13, color: C.textMid }}>📧 {client.email}</span>}
+                {client.city  && <span style={{ fontSize: 13, color: C.textMid }}>📍 {client.city}</span>}
+              </div>
+              <div style={{ marginTop: 8 }}><Badge label={client.status || "نشط"} /></div>
+            </div>
+            <Av name={client.name} size={56} bg={C.p} />
+          </div>
+        </div>
+      </Card>
+
+      {/* Documents */}
+      <Card style={{ padding: 22 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <button onClick={() => setShowDocForm(!showDocForm)}
+            style={{ background: `${C.p}12`, border: `1px solid ${C.p}30`, color: C.p, padding: "8px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>
+            + إضافة وثيقة / ملف
+          </button>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: C.text }}>📂 الوثائق والملفات</h3>
+        </div>
+
+        {/* Formulaire ajout doc */}
+        {showDocForm && (
+          <div style={{ background: C.n100, borderRadius: 14, padding: "18px 20px", marginBottom: 18, border: `1.5px solid ${C.border}` }}>
+            <h4 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700, color: C.text, textAlign: "right" }}>إضافة وثيقة جديدة</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Inp label="اسم الوثيقة / الملف" required value={docForm.name} onChange={e => setDocForm({ ...docForm, name: e.target.value })} placeholder="مثال: CIN رقم 12345678" />
+              <Sel label="نوع الوثيقة" value={docForm.doc_type} onChange={e => setDocForm({ ...docForm, doc_type: e.target.value })} options={DOC_TYPES} />
+            </div>
+            <Inp label="رابط الملف (اختياري)" value={docForm.url} onChange={e => setDocForm({ ...docForm, url: e.target.value })} placeholder="https://drive.google.com/..." />
+            <Inp label="ملاحظات" value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} placeholder="ملاحظات اختيارية..." />
+            <div style={{ background: C.ab, borderRadius: 9, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: C.amber }}>
+              💡 لرفع ملفات حقيقية، استخدم Google Drive أو Dropbox وأضف الرابط هنا
+            </div>
+            <div style={{ display: "flex", gap: 10, flexDirection: "row-reverse" }}>
+              <Btn onClick={addDoc} disabled={!docForm.name}>💾 حفظ الوثيقة</Btn>
+              <Btn v="s" onClick={() => setShowDocForm(false)}>إلغاء</Btn>
+            </div>
+          </div>
+        )}
+
+        {/* Liste docs */}
+        {loadingDocs ? <Spinner /> : docs.length === 0 ? (
+          <Empty icon="📂" msg="لا توجد وثائق. أضف أول ملف للعميل!" />
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            {docs.map(doc => (
+              <div key={doc.id} style={{ background: C.n100, borderRadius: 13, padding: "14px 16px", border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <button onClick={() => removeDoc(doc.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "3px 8px", borderRadius: 6, fontSize: 10, cursor: "pointer", fontFamily: "Tajawal,sans-serif", flexShrink: 0 }}>حذف</button>
+                  <div style={{ textAlign: "right", flex: 1 }}>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: C.text }}>{docTypeIcon[doc.doc_type] || "📎"} {doc.name}</p>
+                    <span style={{ fontSize: 10, background: `${C.p}12`, color: C.p, padding: "2px 8px", borderRadius: 10, fontWeight: 700, display: "inline-block", marginTop: 4 }}>{doc.doc_type}</span>
+                  </div>
+                </div>
+                {doc.notes && <p style={{ margin: 0, fontSize: 12, color: C.textMid, textAlign: "right", fontStyle: "italic" }}>{doc.notes}</p>}
+                {doc.url && (
+                  <a href={doc.url} target="_blank" rel="noreferrer"
+                    style={{ display: "block", background: C.p, color: C.w, padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700, textAlign: "center", textDecoration: "none" }}>
+                    📎 فتح الملف ↗
+                  </a>
+                )}
+                <p style={{ margin: 0, fontSize: 10, color: C.textLight, textAlign: "right" }}>
+                  {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString("ar-TN") : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function Clients({ token }) {
+  const [search, setSearch] = useState(""); const [showAdd, setShowAdd] = useState(false);
+  const [clients, setClients] = useState([]); const [loading, setLoading] = useState(true);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [tm, tt, show] = useToast();
+  const [form, setForm] = useState({ name: "", email: "", phone: "", city: "", lawyer: "Mondher Laadhar" });
+
+  useEffect(() => { db.get("clients", token).then(d => { if (Array.isArray(d)) setClients(d); setLoading(false); }); }, [token]);
 
   const filtered = clients.filter(c => c.name?.includes(search) || c.city?.includes(search));
 
   const save = async () => {
     if (!form.name) return;
-    const res = await db.post("clients", { ...form, lawyer: identity, cases: 0, since: String(new Date().getFullYear()), status: "نشط" }, token);
+    const res = await db.post("clients", { ...form, cases: 0, since: String(new Date().getFullYear()), status: "نشط" }, token);
     if (Array.isArray(res) && res[0]) { setClients([res[0], ...clients]); show("✅ تم إضافة العميل"); }
-    setShowAdd(false); setForm({ name: "", email: "", phone: "", city: "", lawyer: identity });
-  };
-  const remove = async (id) => { await db.del("clients", id, token); setClients(clients.filter(c => c.id !== id)); show("تم الحذف"); };
-
-  const ClientDetail = ({ client }) => {
-    const [docs, setDocs] = useState([]);
-    const [newDoc, setNewDoc] = useState({ name: "", url: "" });
-    const [showDocForm, setShowDocForm] = useState(false);
-    const [editForm, setEditForm] = useState({ ...client });
-    const [saving, setSaving] = useState(false);
-
-    useEffect(() => {
-      db.get("client_documents", token, `&client_id=eq.${client.id}`).then(d => { if (Array.isArray(d)) setDocs(d); });
-    }, [client.id]);
-
-    const addDoc = async () => {
-      if (!newDoc.name) return;
-      const res = await db.post("client_documents", { client_id: client.id, name: newDoc.name, url: newDoc.url }, token);
-      if (Array.isArray(res) && res[0]) { setDocs([...docs, res[0]]); show("✅ تم إضافة المستند"); }
-      setNewDoc({ name: "", url: "" }); setShowDocForm(false);
-    };
-
-    const removeDoc = async (id) => { await db.del("client_documents", id, token); setDocs(docs.filter(d => d.id !== id)); show("تم حذف المستند"); };
-
-    const saveChanges = async () => {
-      setSaving(true);
-      await db.patch("clients", client.id, editForm, token);
-      setClients(clients.map(c => c.id === client.id ? { ...c, ...editForm } : c));
-      setSaving(false); show("✅ تم حفظ التغييرات");
-    };
-
-    return (
-      <div style={{ direction: "rtl" }}>
-        <button onClick={() => setEditClient(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: C.pl, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif", marginBottom: 16 }}>← العودة إلى القائمة</button>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn onClick={saveChanges} disabled={saving}>{saving ? "⏳ جاري الحفظ..." : "💾 حفظ التغييرات"}</Btn>
-            <Btn v="d" onClick={() => { if (window.confirm("حذف هذا العميل؟")) { remove(client.id); setEditClient(null); } }}>🗑 حذف العميل</Btn>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ textAlign: "right" }}>
-              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: C.text }}>{client.name}</h2>
-              <p style={{ margin: "3px 0 0", fontSize: 13, color: C.textLight }}>عميل منذ {client.since}</p>
-            </div>
-            <Av name={client.name} size={50} bg={C.p} />
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
-          <Card style={{ padding: 20 }}>
-            <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700, color: C.text }}>بيانات العميل</h3>
-            <Inp label="الاسم الكامل" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
-            <Inp label="رقم الهاتف" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
-            <Inp label="البريد الإلكتروني" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
-            <Inp label="المدينة" value={editForm.city} onChange={e => setEditForm({ ...editForm, city: e.target.value })} />
-          </Card>
-
-          <Card style={{ padding: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <button onClick={() => setShowDocForm(!showDocForm)} style={{ background: `${C.p}12`, border: "none", color: C.p, padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>+ إضافة وثيقة</button>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.text }}>📎 الوثائق والملفات (CIN...)</h3>
-            </div>
-            {showDocForm && (
-              <div style={{ background: C.n100, borderRadius: 12, padding: 16, marginBottom: 14 }}>
-                <Inp label="اسم الوثيقة" value={newDoc.name} onChange={e => setNewDoc({ ...newDoc, name: e.target.value })} placeholder="مثال: CIN" />
-                <Inp label="رابط الوثيقة" value={newDoc.url} onChange={e => setNewDoc({ ...newDoc, url: e.target.value })} placeholder="https://..." />
-                <div style={{ display: "flex", gap: 8, flexDirection: "row-reverse" }}>
-                  <Btn onClick={addDoc} disabled={!newDoc.name}>إضافة</Btn>
-                  <Btn v="s" onClick={() => setShowDocForm(false)}>إلغاء</Btn>
-                </div>
-              </div>
-            )}
-            {docs.length === 0 ? <Empty icon="📎" msg="لا توجد وثائق مرفقة" /> : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {docs.map(doc => (
-                  <div key={doc.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: C.n100, borderRadius: 10 }}>
-                    <button onClick={() => removeDoc(doc.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "4px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>حذف</button>
-                    <div style={{ textAlign: "right" }}>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: C.text }}>📎 {doc.name}</p>
-                      {doc.url && <a href={doc.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: C.pl }}>عرض الملف ↗</a>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
-    );
+    setShowAdd(false); setForm({ name: "", email: "", phone: "", city: "", lawyer: "Mondher Laadhar" });
   };
 
-  if (editClient) return <div style={{ padding: 4 }}><ClientDetail client={editClient} /></div>;
+  const remove = async (id) => {
+    await db.del("clients", id, token);
+    setClients(clients.filter(c => c.id !== id));
+    setSelectedClient(null);
+    show("تم حذف العميل");
+  };
+
+  if (selectedClient) return (
+    <div>
+      <Toast msg={tm} type={tt} />
+      <ClientDetail client={selectedClient} token={token} onBack={() => setSelectedClient(null)} onDelete={remove} />
+    </div>
+  );
 
   return (
     <div style={{ direction: "rtl" }}>
@@ -442,21 +479,29 @@ function Clients({ token, identity }) {
               </tr></thead>
               <tbody>
                 {filtered.map((c, i) => (
-                  <tr key={c.id} style={{ borderTop: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "12px 16px" }}>
+                  <tr key={c.id} style={{ borderTop: `1px solid ${C.border}`, cursor: "pointer", transition: "background 0.1s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.n100}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <td style={{ padding: "12px 16px" }} onClick={() => setSelectedClient(c)}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, flexDirection: "row-reverse" }}>
                         <Av name={c.name} size={34} bg={i % 2 === 0 ? C.p : C.amber} />
-                        <div style={{ textAlign: "right" }}><p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: C.text }}>{c.name}</p><p style={{ margin: 0, fontSize: 11, color: C.textLight }}>منذ {c.since}</p></div>
+                        <div style={{ textAlign: "right" }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: C.text }}>{c.name}</p>
+                          <p style={{ margin: 0, fontSize: 11, color: C.textLight }}>منذ {c.since}</p>
+                        </div>
                       </div>
                     </td>
-                    <td style={{ padding: "12px 16px", textAlign: "right" }}><p style={{ margin: 0, fontSize: 12 }}>{c.phone}</p><p style={{ margin: 0, fontSize: 11, color: C.textLight }}>{c.email}</p></td>
-                    <td style={{ padding: "12px 16px", fontSize: 13, color: C.textMid, textAlign: "right" }}>{c.city}</td>
-                    <td style={{ padding: "12px 16px", textAlign: "right" }}><Badge label={c.status || "نشط"} /></td>
-                    <td style={{ padding: "12px 16px", textAlign: "left" }}>
-                       <div style={{ display: "flex", gap: 6 }}>
-                         <button onClick={() => setEditClient(c)} style={{ background: `${C.p}12`, border: "none", color: C.p, padding: "5px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>التفاصيل</button>
-                         <button onClick={() => remove(c.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "5px 12px", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>حذف</button>
-                       </div>
+                    <td style={{ padding: "12px 16px", textAlign: "right" }} onClick={() => setSelectedClient(c)}>
+                      <p style={{ margin: 0, fontSize: 12 }}>{c.phone}</p>
+                      <p style={{ margin: 0, fontSize: 11, color: C.textLight }}>{c.email}</p>
+                    </td>
+                    <td style={{ padding: "12px 16px", fontSize: 13, color: C.textMid, textAlign: "right" }} onClick={() => setSelectedClient(c)}>{c.city}</td>
+                    <td style={{ padding: "12px 16px", textAlign: "right" }} onClick={() => setSelectedClient(c)}><Badge label={c.status || "نشط"} /></td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setSelectedClient(c)} style={{ background: `${C.p}12`, border: "none", color: C.p, padding: "5px 10px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>📂 الملف</button>
+                        <button onClick={() => remove(c.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>حذف</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -488,26 +533,25 @@ function Clients({ token, identity }) {
 /* ══════════════════════════════════════════
    CASES — avec édition complète
 ══════════════════════════════════════════ */
-function Cases({ token, identity }) {
+function Cases({ token }) {
   const [filter, setFilter] = useState("الكل");
   const [cases, setCases] = useState([]); const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editCase, setEditCase] = useState(null); // cas sélectionné pour détails
   const [tm, tt, show] = useToast();
-  const [form, setForm] = useState({ title: "", client: "", type: "مدني", court: "", priority: "متوسطة", status: "مفتوحة", hearing_date: "", hearing_time: "", notes: "", lawyer: identity });
+  const [form, setForm] = useState({ title: "", client: "", type: "مدني", court: "", priority: "متوسطة", status: "مفتوحة", hearing_date: "", hearing_time: "", notes: "" });
 
   useEffect(() => {
-    const q = identity ? `&lawyer=eq.${encodeURIComponent(identity)}` : "";
     Promise.all([
-      db.get("cases", token, q),
-      db.get("clients", token, q),
+      db.get("cases", token),
+      db.get("clients", token),
     ]).then(([ca, cl]) => {
       if (Array.isArray(ca)) setCases(ca);
       if (Array.isArray(cl)) setClients(cl);
       setLoading(false);
     });
-  }, [token, identity]);
+  }, [token]);
 
   const statuses = ["الكل","مفتوحة","قيد النظر","معلقة","مكسوبة","مغلقة"];
   const filtered = filter === "الكل" ? cases : cases.filter(c => c.status === filter);
@@ -516,10 +560,10 @@ function Cases({ token, identity }) {
   const save = async () => {
     if (!form.title) return;
     const num = `CML-${new Date().getFullYear()}-${String(cases.length + 1).padStart(3,"0")}`;
-    const res = await db.post("cases", { ...form, number: num, lawyer: identity }, token);
+    const res = await db.post("cases", { ...form, number: num, lawyer: "Mondher Laadhar" }, token);
     if (Array.isArray(res) && res[0]) { setCases([res[0], ...cases]); show("✅ تم إضافة القضية"); }
     setShowAdd(false);
-    setForm({ title: "", client: "", type: "مدني", court: "", priority: "متوسطة", status: "مفتوحة", hearing_date: "", hearing_time: "", notes: "", lawyer: identity });
+    setForm({ title: "", client: "", type: "مدني", court: "", priority: "متوسطة", status: "مفتوحة", hearing_date: "", hearing_time: "", notes: "" });
   };
 
   const updateCase = async (id, data) => {
@@ -755,21 +799,18 @@ function Cases({ token, identity }) {
 /* ══════════════════════════════════════════
    CALENDAR
 ══════════════════════════════════════════ */
-function Calendar({ token, identity }) {
+function Calendar({ token }) {
   const [showAdd, setShowAdd] = useState(false);
   const [appointments, setAppointments] = useState([]); const [loading, setLoading] = useState(true);
   const [tm, tt, show] = useToast();
   const [form, setForm] = useState({ title: "", client: "", client_email: "", type: "استشارة", date: "", time: "", location: "" });
   const TC = { "استشارة": C.amber, "جلسة": C.rose, "اجتماع": C.p, "موعد": C.green };
 
-  useEffect(() => {
-    const q = identity ? `&lawyer=eq.${encodeURIComponent(identity)}` : "";
-    db.get("appointments", token, q).then(d => { if (Array.isArray(d)) setAppointments(d); setLoading(false); });
-  }, [token, identity]);
+  useEffect(() => { db.get("appointments", token).then(d => { if (Array.isArray(d)) setAppointments(d); setLoading(false); }); }, [token]);
 
   const save = async () => {
     if (!form.title) return;
-    const res = await db.post("appointments", { ...form, lawyer: identity, status: "مجدول" }, token);
+    const res = await db.post("appointments", { ...form, lawyer: "Mondher Laadhar", status: "مجدول" }, token);
     if (Array.isArray(res) && res[0]) { setAppointments([res[0], ...appointments]); show("✅ تم إضافة الموعد"); }
     setShowAdd(false);
     setForm({ title: "", client: "", client_email: "", type: "استشارة", date: "", time: "", location: "" });
@@ -782,10 +823,7 @@ function Calendar({ token, identity }) {
       <Toast msg={tm} type={tt} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 10 }}>
         <Btn onClick={() => setShowAdd(true)}>+ إضافة موعد</Btn>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.text }}>الأجندة</h2>
-          <p style={{ margin: "3px 0 0", color: C.textLight, fontSize: 13 }}>{loading ? "جاري التحميل..." : `${appointments.length} موعد`}</p>
-        </div>
+        <div><h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.text }}>الأجندة</h2><p style={{ margin: "3px 0 0", color: C.textLight, fontSize: 13 }}>{loading ? "جاري التحميل..." : `${appointments.length} موعد`}</p></div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
         {[{l:"الكل",f:()=>appointments},{l:"مجدول",f:()=>appointments.filter(a=>a.status==="مجدول")},{l:"مؤكد",f:()=>appointments.filter(a=>a.status==="مؤكد")},{l:"ملغي",f:()=>appointments.filter(a=>a.status==="ملغي")}].map((s,i)=>(<Card key={i} style={{padding:"13px 18px",textAlign:"center",borderTop:`4px solid ${[C.p,C.sky,C.green,C.rose][i]}`}}><p style={{margin:0,fontSize:11,color:C.textLight,fontWeight:700}}>{s.l}</p><p style={{margin:"5px 0 0",fontSize:24,fontWeight:900,color:C.text}}>{s.f().length}</p></Card>))}
@@ -843,47 +881,58 @@ function Calendar({ token, identity }) {
 
 /* ══════════════════════════════════════════
    INVOICES
- ══════════════════════════════════════════ */
-function Invoices({ token, identity }) {
+══════════════════════════════════════════ */
+function Invoices({ token }) {
   const [showAdd, setShowAdd] = useState(false);
   const [invoices, setInvoices] = useState([]); const [loading, setLoading] = useState(true);
   const [tm, tt, show] = useToast();
-  const [form, setForm] = useState({ client: "", amount: "", date: "", status: "غير مدفوع", number: "" });
+  const [form, setForm] = useState({ client: "", case_ref: "", amount: "", due: "" });
 
-  useEffect(() => {
-    const q = identity ? `&lawyer=eq.${encodeURIComponent(identity)}` : "";
-    db.get("invoices", token, q).then(d => { if (Array.isArray(d)) setInvoices(d); setLoading(false); });
-  }, [token, identity]);
+  useEffect(() => { db.get("invoices", token).then(d => { if (Array.isArray(d)) setInvoices(d); setLoading(false); }); }, [token]);
 
+  const total = invoices.reduce((s, i) => s + Number(i.amount || 0), 0);
+  const paid  = invoices.filter(i => i.status === "مدفوعة").reduce((s, i) => s + Number(i.amount || 0), 0);
+
+  const upStatus = async (id, status) => { await db.patch("invoices", id, { status }, token); setInvoices(invoices.map(i => i.id === id ? { ...i, status } : i)); show(`تم التحديث: ${status}`); };
   const save = async () => {
     if (!form.client || !form.amount) return;
-    const res = await db.post("invoices", { ...form, lawyer: identity }, token);
-    if (Array.isArray(res) && res[0]) { setInvoices([res[0], ...invoices]); show("✅ تم إصدار الفاتورة"); }
-    setShowAdd(false); setForm({ client: "", amount: "", date: "", status: "غير مدفوع", number: "" });
+    const num = `CML-${new Date().getFullYear()}-${String(invoices.length + 1).padStart(3,"0")}`;
+    const res = await db.post("invoices", { number: num, client: form.client, case_ref: form.case_ref, amount: parseFloat(form.amount), due: form.due, issued: new Date().toISOString().split("T")[0], status: "مسودة" }, token);
+    if (Array.isArray(res) && res[0]) { setInvoices([res[0], ...invoices]); show("✅ تم إنشاء الفاتورة"); }
+    setShowAdd(false); setForm({ client: "", case_ref: "", amount: "", due: "" });
   };
+  const remove = async (id) => { await db.del("invoices", id, token); setInvoices(invoices.filter(i => i.id !== id)); show("تم الحذف"); };
 
   return (
     <div style={{ direction: "rtl" }}>
       <Toast msg={tm} type={tt} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 10 }}>
-        <Btn onClick={() => setShowAdd(true)}>+ إصدار فاتورة</Btn>
+        <Btn onClick={() => setShowAdd(true)}>+ فاتورة جديدة</Btn>
         <div><h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.text }}>الفواتير</h2><p style={{ margin: "3px 0 0", color: C.textLight, fontSize: 13 }}>{loading ? "جاري التحميل..." : `${invoices.length} فاتورة`}</p></div>
       </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 22 }}>
+        {[{l:"إجمالي الفواتير",v:`${total.toLocaleString()} د.ت`,color:C.p},{l:"تم التحصيل",v:`${paid.toLocaleString()} د.ت`,color:C.green},{l:"مدفوعة",v:invoices.filter(i=>i.status==="مدفوعة").length,color:C.green},{l:"متأخرة",v:invoices.filter(i=>i.status==="متأخرة").length,color:C.rose}].map((k,i)=>(<Card key={i} style={{padding:"16px 18px",borderTop:`4px solid ${k.color}`}}><p style={{margin:0,fontSize:11,color:C.textLight,fontWeight:700,textAlign:"right"}}>{k.l}</p><p style={{margin:"6px 0 0",fontSize:22,fontWeight:900,color:C.text,textAlign:"right"}}>{k.v}</p></Card>))}
+      </div>
       <Card style={{ overflow: "hidden" }}>
-        {loading ? <Spinner /> : invoices.length === 0 ? <Empty icon="🧾" msg="لا توجد فواتير بعد." /> : (
+        {loading ? <Spinner /> : invoices.length === 0 ? <Empty icon="📄" msg="لا توجد فواتير. أنشئ أول فاتورة!" /> : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr style={{ background: C.n100 }}>
-                {["رقم","العميل","المبلغ","التاريخ","الحالة"].map((h, i) => <th key={i} style={{ padding: "10px 16px", textAlign: "right", fontSize: 11, fontWeight: 700, color: C.textLight }}>{h}</th>)}
-              </tr></thead>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+              <thead><tr style={{ background: C.n100 }}>{["الرقم","العميل","المبلغ","الاستحقاق","الحالة","إجراء",""].map((h2,i)=><th key={i} style={{padding:"10px 14px",textAlign:"right",fontSize:11,fontWeight:700,color:C.textLight}}>{h2}</th>)}</tr></thead>
               <tbody>
                 {invoices.map(inv => (
                   <tr key={inv.id} style={{ borderTop: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "12px 16px", fontSize: 13, fontWeight: 700 }}>#{inv.number || "---"}</td>
-                    <td style={{ padding: "12px 16px", fontSize: 13 }}>{inv.client}</td>
-                    <td style={{ padding: "12px 16px", fontSize: 13, fontWeight: 700, color: C.p }}>{inv.amount} د.ت</td>
-                    <td style={{ padding: "12px 16px", fontSize: 12, color: C.textMid }}>{inv.date}</td>
-                    <td style={{ padding: "12px 16px" }}><Badge label={inv.status} /></td>
+                    <td style={{padding:"12px 14px",fontSize:11,fontWeight:700,color:C.p,fontFamily:"monospace"}}>{inv.number}</td>
+                    <td style={{padding:"12px 14px",fontSize:13,fontWeight:700,color:C.text}}>{inv.client}</td>
+                    <td style={{padding:"12px 14px",fontSize:13,fontWeight:800,color:C.text}}>{Number(inv.amount||0).toLocaleString()} د.ت</td>
+                    <td style={{padding:"12px 14px",fontSize:12,color:C.textMid}}>{inv.due}</td>
+                    <td style={{padding:"12px 14px"}}><Badge label={inv.status}/></td>
+                    <td style={{padding:"12px 14px"}}>
+                      {inv.status==="مسودة" && <Btn sm onClick={()=>upStatus(inv.id,"مرسلة")}>إرسال</Btn>}
+                      {inv.status==="مرسلة" && <Btn sm v="g" onClick={()=>upStatus(inv.id,"مدفوعة")}>تحصيل</Btn>}
+                      {inv.status==="متأخرة" && <Btn sm v="d" onClick={()=>upStatus(inv.id,"مرسلة")}>تذكير</Btn>}
+                      {inv.status==="مدفوعة" && <Btn sm v="s">PDF</Btn>}
+                    </td>
+                    <td style={{padding:"12px 14px"}}><button onClick={()=>remove(inv.id)} style={{background:C.roseBg,border:"none",color:C.rose,padding:"4px 8px",borderRadius:6,fontSize:10,cursor:"pointer",fontFamily:"Tajawal,sans-serif"}}>🗑</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -892,17 +941,16 @@ function Invoices({ token, identity }) {
         )}
       </Card>
       {showAdd && (
-        <Modal title="إصدار فاتورة جديدة" onClose={() => setShowAdd(false)}>
+        <Modal title="فاتورة جديدة" onClose={() => setShowAdd(false)}>
           <div style={{ direction: "rtl" }}>
-            <Inp label="اسم العميل" value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} />
+            <Inp label="اسم العميل" required value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} />
+            <Inp label="رقم القضية" value={form.case_ref} onChange={e => setForm({ ...form, case_ref: e.target.value })} placeholder="CML-2025-001" />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Inp label="المبلغ (د.ت)" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} type="number" />
-              <Inp label="التاريخ" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} type="date" />
+              <Inp label="المبلغ (د.ت)" required value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0" />
+              <Inp label="تاريخ الاستحقاق" value={form.due} onChange={e => setForm({ ...form, due: e.target.value })} type="date" />
             </div>
-            <Inp label="رقم الفاتورة" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} />
-            <Sel label="الحالة" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} options={["مدفوع","غير مدفوع","ملغي"]} />
             <div style={{ display: "flex", gap: 10, flexDirection: "row-reverse" }}>
-              <Btn onClick={save} disabled={!form.client || !form.amount} full>💾 حفظ الفاتورة</Btn>
+              <Btn onClick={save} disabled={!form.client || !form.amount} full>💾 إنشاء الفاتورة</Btn>
               <Btn v="s" onClick={() => setShowAdd(false)} full>إلغاء</Btn>
             </div>
           </div>
@@ -966,26 +1014,94 @@ function AIAssistant() {
 /* ══════════════════════════════════════════
    ANALYTICS
 ══════════════════════════════════════════ */
-function Analytics({ token, identity }) {
+function Analytics({ token }) {
   const [data, setData] = useState(null); const [loading, setLoading] = useState(true);
   useEffect(() => {
-    const q = identity ? `&lawyer=eq.${encodeURIComponent(identity)}` : "";
-    Promise.all([db.get("clients", token, q), db.get("cases", token, q)]).then(([cl, ca]) => {
+    Promise.all([db.get("clients", token), db.get("cases", token)]).then(([cl, ca]) => {
       const clients = Array.isArray(cl) ? cl : []; const cases = Array.isArray(ca) ? ca : [];
-      setData({ clients: clients.length, cases: cases.length, won: cases.filter(c => c.status === "مكسوبة").length });
+      setData({
+        clients: clients.length, cases: cases.length,
+        won: cases.filter(c => c.status === "مكسوبة").length,
+        active: cases.filter(c => !["مغلقة","مكسوبة"].includes(c.status)).length,
+        byType: [
+          { label: "مدني",   value: cases.filter(c => c.type === "مدني").length,   color: C.p },
+          { label: "تجاري",  value: cases.filter(c => c.type === "تجاري").length,  color: C.a },
+          { label: "أسري",   value: cases.filter(c => c.type === "أسري").length,   color: C.amber },
+          { label: "جنائي",  value: cases.filter(c => c.type === "جنائي").length,  color: C.rose },
+          { label: "عمالي",  value: cases.filter(c => c.type === "عمالي").length,  color: C.purple },
+          { label: "إداري",  value: cases.filter(c => c.type === "إداري").length,  color: C.green },
+        ].filter(d => d.value > 0),
+      });
       setLoading(false);
     });
-  }, [token, identity]);
+  }, [token]);
   if (loading) return <Spinner />;
   if (!data) return null;
   const winRate = data.cases > 0 ? Math.round(data.won / data.cases * 100) : 0;
+  const maxType = Math.max(...data.byType.map(d => d.value), 1);
   return (
     <div style={{ direction: "rtl" }}>
       <div style={{ marginBottom: 22 }}><h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.text }}>التحليلات — Cabinet CML</h2></div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
-        {[{l:"إجمالي العملاء",v:data.clients,color:C.p,icon:"👥"},{l:"القضايا",v:data.cases,color:C.amber,icon:"⚖️"},{l:"معدل الفوز",v:`${winRate}%`,color:C.green,icon:"🏆"}].map((k,i)=>(
-          <Card key={i} style={{padding:"18px 20px",borderTop:`4px solid ${k.color}`}}><div style={{display:"flex",justifyContent:"space-between"}}><div><p style={{margin:0,fontSize:11,color:C.textLight,fontWeight:700}}>{k.l}</p><p style={{margin:"6px 0 0",fontSize:26,fontWeight:900,color:C.text}}>{k.v}</p></div><span style={{fontSize:24}}>{k.icon}</span></div></Card>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+        {[
+          {l:"إجمالي العملاء",v:data.clients,color:C.p,icon:"👥"},
+          {l:"القضايا النشطة",v:data.active,color:C.amber,icon:"⚖️"},
+          {l:"قضايا مكسوبة",v:data.won,color:C.green,icon:"🏆"},
+          {l:"معدل الفوز",v:`${winRate}%`,color:C.green,icon:"📊"},
+        ].map((k,i)=>(
+          <Card key={i} style={{padding:"18px 20px",borderTop:`4px solid ${k.color}`}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <div><p style={{margin:0,fontSize:11,color:C.textLight,fontWeight:700}}>{k.l}</p><p style={{margin:"6px 0 0",fontSize:26,fontWeight:900,color:C.text}}>{k.v}</p></div>
+              <span style={{fontSize:24}}>{k.icon}</span>
+            </div>
+          </Card>
         ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
+        {/* Bar chart by type */}
+        <Card style={{ padding: 24 }}>
+          <h3 style={{ margin: "0 0 20px", fontSize: 15, fontWeight: 700, color: C.text }}>القضايا حسب النوع</h3>
+          {data.byType.length === 0 ? <Empty icon="⚖️" msg="لا توجد بيانات" /> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {data.byType.map((d, i) => (
+                <div key={i}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: d.color }}>{d.value} ({Math.round(d.value / data.cases * 100)}%)</span>
+                    <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{d.label}</span>
+                  </div>
+                  <div style={{ background: C.border, borderRadius: 4, height: 8 }}>
+                    <div style={{ width: `${(d.value / maxType) * 100}%`, height: "100%", background: d.color, borderRadius: 4, transition: "width 0.8s ease" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Status breakdown */}
+        <Card style={{ padding: 24 }}>
+          <h3 style={{ margin: "0 0 18px", fontSize: 15, fontWeight: 700, color: C.text }}>مؤشرات الجودة</h3>
+          {[
+            { name: "معدل الفوز", value: winRate, target: 80 },
+            { name: "القضايا المكسوبة", value: data.won, target: Math.max(data.cases, 1), isCount: true },
+            { name: "القضايا النشطة", value: data.active, target: Math.max(data.cases, 1), isCount: true },
+          ].map((ind, i) => {
+            const pct = ind.isCount ? Math.round(ind.value / ind.target * 100) : ind.value;
+            const col = pct >= ind.target && !ind.isCount ? C.green : pct >= 50 ? C.amber : C.rose;
+            return (
+              <div key={i} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: col }}>{ind.isCount ? ind.value : `${ind.value}%`}</span>
+                  <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{ind.name}</span>
+                </div>
+                <div style={{ background: C.border, borderRadius: 4, height: 8 }}>
+                  <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: col, borderRadius: 4, transition: "width 0.8s" }} />
+                </div>
+              </div>
+            );
+          })}
+        </Card>
       </div>
     </div>
   );
@@ -1113,114 +1229,268 @@ function AccessPage({ token }) {
    GESTION DES AFFECTATIONS — page admin
 ══════════════════════════════════════════ */
 function AssignmentsPage({ token }) {
-  const [assignments, setAssignments] = useState([]); const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true); const [showAdd, setShowAdd] = useState(false);
+  const [assignments, setAssignments] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
   const [tm, tt, show] = useToast();
-  const [form, setForm] = useState({ secretary_id: "", secretary_email: "", assigned_to_id: "", assigned_to_email: "" });
+  const [dbError, setDbError] = useState("");
+  const [form, setForm] = useState({
+    secretary_email: "", secretary_name: "", secretary_role: "",
+    assigned_to_email: "", assigned_to_name: "", assigned_to_role: "",
+  });
+  // Mode manuel si user_roles vide
+  const [manualMode, setManualMode] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    secretary_email: "", secretary_name: "", secretary_role: "secretary_lawyer",
+    assigned_to_email: "", assigned_to_name: "", assigned_to_role: "lawyer",
+  });
 
-  useEffect(() => {
-    Promise.all([db.get("assignments", token), db.get("user_roles", token)]).then(([as, ur]) => {
-      if (Array.isArray(as)) setAssignments(as);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [as, ur] = await Promise.all([
+        db.get("assignments", token),
+        db.get("user_roles", token),
+      ]);
+      if (Array.isArray(as)) {
+        setAssignments(as);
+      } else {
+        setDbError(`Erreur assignments: ${JSON.stringify(as)}`);
+      }
       if (Array.isArray(ur)) setUsers(ur);
-      setLoading(false);
-    });
-  }, [token]);
+    } catch (e) {
+      setDbError(`Erreur: ${e.message}`);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [token]);
 
   const secretaries = users.filter(u => u.role === "secretary_lawyer" || u.role === "secretary_collaborator");
   const lawyers = users.filter(u => u.role === "lawyer" || u.role === "collaborator");
 
   const save = async () => {
-    if (!form.secretary_id || !form.assigned_to_id) return;
-    const res = await db.post("assignments", { ...form }, token);
-    if (Array.isArray(res) && res[0]) { setAssignments([res[0], ...assignments]); show("✅ تم إنشاء الإسناد"); }
-    setShowAdd(false); setForm({ secretary_id: "", secretary_email: "", assigned_to_id: "", assigned_to_email: "" });
+    const data = manualMode ? {
+      secretary_email: manualForm.secretary_email,
+      secretary_name: manualForm.secretary_name,
+      assigned_to_email: manualForm.assigned_to_email,
+      assigned_to_name: manualForm.assigned_to_name,
+      secretary_role: manualForm.secretary_role,
+      assigned_to_role: manualForm.assigned_to_role,
+    } : {
+      secretary_email: form.secretary_email,
+      secretary_name: form.secretary_name,
+      assigned_to_email: form.assigned_to_email,
+      assigned_to_name: form.assigned_to_name,
+      secretary_role: form.secretary_role,
+      assigned_to_role: form.assigned_to_role,
+    };
+
+    if (!data.secretary_email || !data.assigned_to_email) {
+      show("⚠️ يرجى تعبئة جميع الحقول", "warn"); return;
+    }
+
+    const res = await db.post("assignments", data, token);
+    if (Array.isArray(res) && res[0]) {
+      setAssignments([res[0], ...assignments]);
+      show("✅ تم إنشاء الإسناد بنجاح");
+      setShowAdd(false);
+      setForm({ secretary_email: "", secretary_name: "", secretary_role: "", assigned_to_email: "", assigned_to_name: "", assigned_to_role: "" });
+      setManualForm({ secretary_email: "", secretary_name: "", secretary_role: "secretary_lawyer", assigned_to_email: "", assigned_to_name: "", assigned_to_role: "lawyer" });
+    } else {
+      show("❌ خطأ في الحفظ — تحقق من جدول assignments في Supabase", "err");
+    }
   };
 
-  const remove = async (id) => { await db.del("assignments", id, token); setAssignments(assignments.filter(a => a.id !== id)); show("تم حذف الإسناد"); };
+  const remove = async (id) => {
+    await db.del("assignments", id, token);
+    setAssignments(assignments.filter(a => a.id !== id));
+    show("تم حذف الإسناد");
+  };
 
-  const getName = (email) => users.find(u => u.email === email)?.name || email;
-  const getRole = (email) => users.find(u => u.email === email)?.role || "";
+  const roleLabel = (role) => ROLES[role]?.label || role || "—";
+  const roleColor = { admin: C.p, lawyer: C.amber, collaborator: C.teal, secretary_lawyer: C.purple, secretary_collaborator: C.amber };
 
   return (
     <div style={{ direction: "rtl" }}>
       <Toast msg={tm} type={tt} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22, flexWrap: "wrap", gap: 10 }}>
-        <Btn onClick={() => setShowAdd(true)}>+ إنشاء إسناد</Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn onClick={() => setShowAdd(true)}>+ إنشاء إسناد</Btn>
+          <button onClick={load} style={{ background: C.n200, border: "none", color: C.textMid, padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>🔄 تحديث</button>
+        </div>
         <div>
           <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.text }}>📋 إدارة الإسناد</h2>
           <p style={{ margin: "3px 0 0", color: C.textLight, fontSize: 13 }}>ربط السكرتير بالمحامي أو المتعاون</p>
         </div>
       </div>
 
+      {/* Debug error */}
+      {dbError && (
+        <div style={{ background: C.roseBg, border: `1px solid ${C.rose}`, borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 12, color: C.rose, fontFamily: "monospace", direction: "ltr" }}>
+          ⚠️ {dbError}
+          <br /><strong>Solution:</strong> Exécutez le SQL ci-dessous dans Supabase → SQL Editor
+        </div>
+      )}
+
+      {/* SQL hint if table issue */}
+      {(dbError || assignments.length === 0) && !loading && (
+        <Card style={{ padding: 18, marginBottom: 16, borderRight: `4px solid ${C.sky}` }}>
+          <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: C.sky }}>🔧 Si la table n'existe pas, exécutez ce SQL dans Supabase :</p>
+          <pre style={{ background: C.n100, padding: 12, borderRadius: 8, fontSize: 11, color: C.text, overflow: "auto", direction: "ltr", lineHeight: 1.6 }}>{`drop table if exists assignments;
+create table assignments (
+  id uuid primary key default gen_random_uuid(),
+  secretary_email text,
+  secretary_name text,
+  secretary_role text,
+  assigned_to_email text,
+  assigned_to_name text,
+  assigned_to_role text,
+  created_at timestamp default now()
+);
+alter table assignments disable row level security;
+grant all on assignments to anon;
+grant all on assignments to authenticated;`}</pre>
+        </Card>
+      )}
+
+      {/* Info */}
       <Card style={{ padding: 18, marginBottom: 18, borderRight: `4px solid ${C.amber}` }}>
-        <p style={{ margin: 0, fontSize: 13.5, color: C.text, lineHeight: 1.7 }}>
+        <p style={{ margin: 0, fontSize: 13.5, color: C.text, lineHeight: 1.8 }}>
           <strong>كيفية عمل الإسناد:</strong><br />
           🔹 سكرتير محامٍ ← يرى فقط بيانات المحامي المسند إليه<br />
           🔹 سكرتير متعاون ← يرى فقط بيانات المتعاون المسند إليه<br />
-          🔹 فقط المدير يمكنه تعديل أو حذف الإسناد
+          🔹 فقط المدير يمكنه تعديل أو حذف الإسناد<br />
+          📊 <strong>الإسنادات الحالية: {assignments.length}</strong>
         </p>
       </Card>
 
-      {loading ? <Spinner /> : assignments.length === 0 ? <Empty icon="🔗" msg="لا توجد إسنادات. أنشئ أول إسناد!" /> : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {assignments.map(a => {
-            const secRole = getRole(a.secretary_email);
-            const asRole = getRole(a.assigned_to_email);
-            return (
-              <Card key={a.id} style={{ padding: "16px 20px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, flexDirection: "row-reverse" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
-                    {/* Secretary */}
-                    <div style={{ background: C.purpleBg, borderRadius: 12, padding: "10px 16px", textAlign: "right", flex: 1 }}>
-                      <p style={{ margin: 0, fontSize: 11, color: C.purple, fontWeight: 700 }}>السكرتير</p>
-                      <p style={{ margin: "3px 0 0", fontWeight: 700, fontSize: 13.5, color: C.text }}>{getName(a.secretary_email)}</p>
-                      <p style={{ margin: "1px 0 0", fontSize: 11, color: C.textLight }}>{a.secretary_email}</p>
-                      <Badge label={secRole} />
-                    </div>
-                    <div style={{ fontSize: 22, color: C.textLight, flexShrink: 0 }}>←</div>
-                    {/* Assigned to */}
-                    <div style={{ background: C.ab, borderRadius: 12, padding: "10px 16px", textAlign: "right", flex: 1 }}>
-                      <p style={{ margin: 0, fontSize: 11, color: C.amber, fontWeight: 700 }}>المسند إليه</p>
-                      <p style={{ margin: "3px 0 0", fontWeight: 700, fontSize: 13.5, color: C.text }}>{getName(a.assigned_to_email)}</p>
-                      <p style={{ margin: "1px 0 0", fontSize: 11, color: C.textLight }}>{a.assigned_to_email}</p>
-                      <Badge label={asRole} />
-                    </div>
-                  </div>
-                  <button onClick={() => remove(a.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "6px 12px", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "Tajawal,sans-serif", flexShrink: 0 }}>حذف الإسناد</button>
+      {loading ? <Spinner /> : assignments.length === 0 ? (
+        <Empty icon="🔗" msg="لا توجد إسنادات بعد. أنشئ أول إسناد!" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {assignments.map(a => (
+            <Card key={a.id} style={{ padding: "18px 22px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                {/* Secretary box */}
+                <div style={{ flex: 1, minWidth: 200, background: C.purpleBg, borderRadius: 12, padding: "12px 16px", textAlign: "right", border: `1px solid ${C.purple}30` }}>
+                  <p style={{ margin: "0 0 4px", fontSize: 11, color: C.purple, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>السكرتير</p>
+                  <p style={{ margin: "0 0 3px", fontWeight: 800, fontSize: 15, color: C.text }}>{a.secretary_name || a.secretary_email || "—"}</p>
+                  <p style={{ margin: "0 0 6px", fontSize: 11, color: C.textLight }}>{a.secretary_email}</p>
+                  <Badge label={a.secretary_role || "secretary_lawyer"} />
                 </div>
-              </Card>
-            );
-          })}
+
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                  <span style={{ fontSize: 24, color: C.textLight }}>⟶</span>
+                  <span style={{ fontSize: 10, color: C.textLight, fontWeight: 600 }}>مسند إلى</span>
+                </div>
+
+                {/* Assigned to box */}
+                <div style={{ flex: 1, minWidth: 200, background: C.ab, borderRadius: 12, padding: "12px 16px", textAlign: "right", border: `1px solid ${C.a}30` }}>
+                  <p style={{ margin: "0 0 4px", fontSize: 11, color: C.amber, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>المسند إليه</p>
+                  <p style={{ margin: "0 0 3px", fontWeight: 800, fontSize: 15, color: C.text }}>{a.assigned_to_name || a.assigned_to_email || "—"}</p>
+                  <p style={{ margin: "0 0 6px", fontSize: 11, color: C.textLight }}>{a.assigned_to_email}</p>
+                  <Badge label={a.assigned_to_role || "lawyer"} />
+                </div>
+
+                <button onClick={() => remove(a.id)}
+                  style={{ background: C.roseBg, border: `1px solid ${C.rose}30`, color: C.rose, padding: "8px 16px", borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif", flexShrink: 0 }}>
+                  🗑 حذف
+                </button>
+              </div>
+            </Card>
+          ))}
         </div>
       )}
 
       {showAdd && (
         <Modal title="إنشاء إسناد جديد" onClose={() => setShowAdd(false)}>
           <div style={{ direction: "rtl" }}>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 5 }}>السكرتير <span style={{ color: C.rose }}>*</span></label>
-              <select value={form.secretary_email} onChange={e => { const u = users.find(u => u.email === e.target.value); setForm({ ...form, secretary_email: e.target.value, secretary_id: u?.id || "" }); }}
-                style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: `1.5px solid ${C.border}`, fontSize: 13.5, color: C.text, background: C.n100, outline: "none", textAlign: "right", fontFamily: "Tajawal,sans-serif" }}>
-                <option value="">— اختر السكرتير —</option>
-                {secretaries.map(u => <option key={u.id} value={u.email}>{u.name} ({ROLES[u.role]?.label})</option>)}
-              </select>
-              {secretaries.length === 0 && <p style={{ margin: "5px 0 0", fontSize: 12, color: C.rose }}>لا يوجد سكرتير. أضف مستخدمين بدور سكرتير أولاً.</p>}
+            {/* Toggle manual/auto */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <button onClick={() => setManualMode(false)}
+                style={{ flex: 1, padding: "8px", borderRadius: 9, border: `2px solid ${!manualMode ? C.p : C.border}`, background: !manualMode ? `${C.p}12` : C.w, color: !manualMode ? C.p : C.textMid, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>
+                📋 من قائمة المستخدمين
+              </button>
+              <button onClick={() => setManualMode(true)}
+                style={{ flex: 1, padding: "8px", borderRadius: 9, border: `2px solid ${manualMode ? C.p : C.border}`, background: manualMode ? `${C.p}12` : C.w, color: manualMode ? C.p : C.textMid, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>
+                ✏️ إدخال يدوي
+              </button>
             </div>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 5 }}>المسند إليه (محامٍ / متعاون) <span style={{ color: C.rose }}>*</span></label>
-              <select value={form.assigned_to_email} onChange={e => { const u = users.find(u => u.email === e.target.value); setForm({ ...form, assigned_to_email: e.target.value, assigned_to_id: u?.id || "" }); }}
-                style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: `1.5px solid ${C.border}`, fontSize: 13.5, color: C.text, background: C.n100, outline: "none", textAlign: "right", fontFamily: "Tajawal,sans-serif" }}>
-                <option value="">— اختر المحامي أو المتعاون —</option>
-                {lawyers.map(u => <option key={u.id} value={u.email}>{u.name} ({ROLES[u.role]?.label})</option>)}
-              </select>
-            </div>
-            {form.secretary_email && form.assigned_to_email && (
+
+            {!manualMode ? (
+              <>
+                {/* Secretary select */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 5 }}>السكرتير <span style={{ color: C.rose }}>*</span></label>
+                  {secretaries.length === 0 ? (
+                    <div style={{ background: C.amberBg, borderRadius: 9, padding: "10px 14px", fontSize: 13, color: C.amber }}>
+                      ⚠️ لا يوجد سكرتير في جدول user_roles — استخدم الإدخال اليدوي
+                    </div>
+                  ) : (
+                    <select value={form.secretary_email}
+                      onChange={e => { const u = users.find(u => u.email === e.target.value); setForm({ ...form, secretary_email: e.target.value, secretary_name: u?.name || "", secretary_role: u?.role || "" }); }}
+                      style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: `1.5px solid ${C.border}`, fontSize: 13.5, color: C.text, background: C.n100, outline: "none", textAlign: "right", fontFamily: "Tajawal,sans-serif" }}>
+                      <option value="">— اختر السكرتير —</option>
+                      {secretaries.map(u => <option key={u.id} value={u.email}>{u.name} — {ROLES[u.role]?.label} ({u.email})</option>)}
+                    </select>
+                  )}
+                </div>
+
+                {/* Lawyer select */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 5 }}>المسند إليه (محامٍ / متعاون) <span style={{ color: C.rose }}>*</span></label>
+                  {lawyers.length === 0 ? (
+                    <div style={{ background: C.amberBg, borderRadius: 9, padding: "10px 14px", fontSize: 13, color: C.amber }}>
+                      ⚠️ لا يوجد محامٍ في جدول user_roles — استخدم الإدخال اليدوي
+                    </div>
+                  ) : (
+                    <select value={form.assigned_to_email}
+                      onChange={e => { const u = users.find(u => u.email === e.target.value); setForm({ ...form, assigned_to_email: e.target.value, assigned_to_name: u?.name || "", assigned_to_role: u?.role || "" }); }}
+                      style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: `1.5px solid ${C.border}`, fontSize: 13.5, color: C.text, background: C.n100, outline: "none", textAlign: "right", fontFamily: "Tajawal,sans-serif" }}>
+                      <option value="">— اختر المحامي أو المتعاون —</option>
+                      {lawyers.map(u => <option key={u.id} value={u.email}>{u.name} — {ROLES[u.role]?.label} ({u.email})</option>)}
+                    </select>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Manual mode */}
+                <div style={{ background: C.skyBg, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.sky }}>
+                  💡 أدخل البيانات يدوياً إذا لم تكن المستخدمين في قائمة user_roles
+                </div>
+                <p style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 700, color: C.purple }}>السكرتير</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
+                  <Inp label="الاسم" value={manualForm.secretary_name} onChange={e => setManualForm({ ...manualForm, secretary_name: e.target.value })} placeholder="اسم السكرتير" />
+                  <Inp label="البريد الإلكتروني" value={manualForm.secretary_email} onChange={e => setManualForm({ ...manualForm, secretary_email: e.target.value })} type="email" placeholder="secretary@email.com" />
+                </div>
+                <Sel label="دور السكرتير" value={manualForm.secretary_role}
+                  onChange={e => setManualForm({ ...manualForm, secretary_role: e.target.value })}
+                  options={[{ v: "secretary_lawyer", l: "سكرتير محامٍ" }, { v: "secretary_collaborator", l: "سكرتير متعاون" }]} />
+
+                <p style={{ margin: "8px 0 12px", fontSize: 13, fontWeight: 700, color: C.amber }}>المسند إليه</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
+                  <Inp label="الاسم" value={manualForm.assigned_to_name} onChange={e => setManualForm({ ...manualForm, assigned_to_name: e.target.value })} placeholder="اسم المحامي/المتعاون" />
+                  <Inp label="البريد الإلكتروني" value={manualForm.assigned_to_email} onChange={e => setManualForm({ ...manualForm, assigned_to_email: e.target.value })} type="email" placeholder="lawyer@email.com" />
+                </div>
+                <Sel label="الدور" value={manualForm.assigned_to_role}
+                  onChange={e => setManualForm({ ...manualForm, assigned_to_role: e.target.value })}
+                  options={[{ v: "lawyer", l: "محامٍ" }, { v: "collaborator", l: "متعاون" }]} />
+              </>
+            )}
+
+            {/* Preview */}
+            {((form.secretary_email && form.assigned_to_email && !manualMode) ||
+              (manualForm.secretary_email && manualForm.assigned_to_email && manualMode)) && (
               <div style={{ background: C.greenBg, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.green }}>
-                ✅ سيتمكن {users.find(u => u.email === form.secretary_email)?.name} من رؤية بيانات {users.find(u => u.email === form.assigned_to_email)?.name} فقط
+                ✅ سيتمكن <strong>{manualMode ? manualForm.secretary_name : form.secretary_name}</strong> من رؤية بيانات <strong>{manualMode ? manualForm.assigned_to_name : form.assigned_to_name}</strong> فقط
               </div>
             )}
+
             <div style={{ display: "flex", gap: 10, flexDirection: "row-reverse" }}>
-              <Btn onClick={save} disabled={!form.secretary_id || !form.assigned_to_id} full>💾 إنشاء الإسناد</Btn>
+              <Btn onClick={save} full>💾 إنشاء الإسناد</Btn>
               <Btn v="s" onClick={() => setShowAdd(false)} full>إلغاء</Btn>
             </div>
           </div>
@@ -1278,28 +1548,26 @@ function Settings({ onLogout }) {
 export default function App() {
   const [nav, setNav] = useState("dashboard");
   const [token, setToken] = useState(() => localStorage.getItem("cml_token") || null);
-  const [userRole, setUserRole] = useState("lawyer");
-  const [userEmail, setUserEmail] = useState("");
-  const [assignedTo, setAssignedTo] = useState("");
+  const [userRole, setUserRole] = useState("lawyer"); // rôle de l'utilisateur connecté
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loadingRole, setLoadingRole] = useState(false);
 
   const handleLogin = async (t, user) => {
     localStorage.setItem("cml_token", t);
-    setToken(t); setUserEmail(user.email);
+    setToken(t);
     setLoadingRole(true);
-    const roles = await db.get("user_roles", t, `&email=eq.${encodeURIComponent(user.email)}`);
-    if (Array.isArray(roles) && roles[0]) {
-      const role = roles[0].role;
-      setUserRole(role);
-      if (role === "admin") setNav("access");
-      if (role.startsWith("secretary")) {
-        const as = await db.get("assignments", t, `&secretary_email=eq.${encodeURIComponent(user.email)}`);
-        if (Array.isArray(as) && as[0]) setAssignedTo(as[0].assigned_to_email);
-      }
-    } else if (user.email === "admin@admin.com") {
+    // Vérification admin fixe
+    if (user.email === "admin@admin.com") {
       setUserRole("admin");
       setNav("access");
+      setLoadingRole(false);
+      return;
+    }
+    // Charger le rôle depuis user_roles
+    const roles = await db.get("user_roles", t, `&email=eq.${encodeURIComponent(user.email)}`);
+    if (Array.isArray(roles) && roles[0]) {
+      setUserRole(roles[0].role);
+      if (roles[0].role === "admin") setNav("access");
     } else {
       setUserRole("lawyer");
     }
@@ -1309,7 +1577,7 @@ export default function App() {
   const handleLogout = async () => {
     if (token) await db.logout(token);
     localStorage.removeItem("cml_token");
-    setToken(null); setUserRole("lawyer"); setNav("dashboard"); setUserEmail(""); setAssignedTo("");
+    setToken(null); setUserRole("lawyer"); setNav("dashboard");
   };
 
   // Définir les pages visibles selon le rôle
@@ -1321,7 +1589,7 @@ export default function App() {
     { id: "clients",   label: "العملاء",      icon: "👥", adminOnly: false },
     { id: "cases",     label: "القضايا",      icon: "⚖️", adminOnly: false },
     { id: "calendar",  label: "الأجندة",      icon: "📅", adminOnly: false },
-    { id: "invoices",  label: "الفواتير",     icon: "🧾", adminOnly: false },
+    { id: "invoices",  label: "الفواتير",     icon: "📄", adminOnly: false },
     { id: "ai",        label: "المساعد الذكي",icon: "🤖", adminOnly: false },
     { id: "analytics", label: "التحليلات",    icon: "📊", adminOnly: false },
     { id: "access",    label: "إدارة الوصول", icon: "🔐", adminOnly: true },
@@ -1331,13 +1599,14 @@ export default function App() {
 
   const visibleNav = ALL_NAV.filter(item => {
     if (item.adminOnly) return userRole === "admin";
+    if (userRole === "admin") return false; // admin sees only adminOnly pages
     return rolePages.includes(item.id);
   });
 
   // Redirection si page non autorisée
   useEffect(() => {
     if (token && !rolePages.includes(nav) && !(userRole === "admin" && ["access","assignments","settings"].includes(nav))) {
-      setNav(rolePages[0] || "dashboard");
+      setNav(userRole === "admin" ? "access" : rolePages[0] || "dashboard");
     }
   }, [nav, rolePages, userRole, token]);
 
@@ -1345,20 +1614,18 @@ export default function App() {
   if (loadingRole) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontFamily: "Tajawal,sans-serif" }}><div style={{ textAlign: "center" }}><div style={{ width: 44, height: 44, borderRadius: "50%", border: `3px solid #E8DDD8`, borderTopColor: "#4A1528", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} /><p style={{ color: "#A08080", fontSize: 13 }}>جاري تحميل صلاحياتك...</p></div></div>;
 
   const renderPage = () => {
-    const identity = userRole.startsWith("secretary") ? assignedTo : userEmail;
     switch (nav) {
-      case "dashboard":   return <Dashboard setNav={setNav} token={token} identity={identity} />;
-      case "clients":     return <Clients token={token} identity={identity} />;
-      case "cases":       return <Cases token={token} identity={identity} />;
-      case "calendar":    return <Calendar token={token} identity={identity} />;
-      case "invoices":    return <Invoices token={token} identity={identity} />;
-
+      case "dashboard":   return <Dashboard setNav={setNav} token={token} />;
+      case "clients":     return <Clients token={token} />;
+      case "cases":       return <Cases token={token} />;
+      case "calendar":    return <Calendar token={token} />;
+      case "invoices":    return <Invoices token={token} />;
       case "ai":          return <AIAssistant />;
-      case "analytics":   return <Analytics token={token} identity={identity} />;
+      case "analytics":   return <Analytics token={token} />;
       case "access":      return <AccessPage token={token} />;
       case "assignments":  return <AssignmentsPage token={token} />;
       case "settings":    return <Settings onLogout={handleLogout} />;
-      default:            return <Dashboard setNav={setNav} token={token} identity={identity} />;
+      default:            return <Dashboard setNav={setNav} token={token} />;
     }
   };
 
