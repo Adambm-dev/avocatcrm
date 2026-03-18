@@ -51,10 +51,10 @@ const db = {
 ══════════════════════════════════════════ */
 const ROLES = {
   admin:                 { label: "مدير", color: "#4A1528", pages: ["access", "assignments", "settings"] },
-  lawyer:                { label: "محامٍ", color: "#C9A84C", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics","settings"] },
-  collaborator:          { label: "متعاون", color: "#0D9488", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics","settings"] },
-  secretary_lawyer:      { label: "سكرتير محامٍ", color: "#7C3AED", pages: ["dashboard","clients","cases","calendar","invoices"] },
-  secretary_collaborator:{ label: "سكرتير متعاون", color: "#D97706", pages: ["dashboard","clients","cases","calendar","invoices"] },
+  lawyer:                { label: "محامٍ", color: "#C9A84C", pages: ["dashboard","clients","cases","calendar","ai","analytics","settings"] },
+  collaborator:          { label: "متعاون", color: "#0D9488", pages: ["dashboard","clients","cases","calendar","ai","analytics","settings"] },
+  secretary_lawyer:      { label: "سكرتير محامٍ", color: "#7C3AED", pages: ["dashboard","clients","cases","calendar"] },
+  secretary_collaborator:{ label: "سكرتير متعاون", color: "#D97706", pages: ["dashboard","clients","cases","calendar"] },
 };
 
 const canAccess = (role, page) => ROLES[role]?.pages.includes(page) ?? false;
@@ -218,17 +218,16 @@ function LoginPage({ onLogin }) {
    DASHBOARD
 ══════════════════════════════════════════ */
 function Dashboard({ setNav, token }) {
-  const [stats, setStats] = useState({ clients: 0, cases: 0, paid: 0, apts: 0 });
+  const [stats, setStats] = useState({ clients: 0, cases: 0, apts: 0 });
   const [recentCases, setRecentCases] = useState([]);
   const [upcomingApts, setUpcomingApts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([db.get("clients", token), db.get("cases", token), db.get("invoices", token), db.get("appointments", token)]).then(([cl, ca, inv, ap]) => {
+    Promise.all([db.get("clients", token), db.get("cases", token), db.get("appointments", token)]).then(([cl, ca, ap]) => {
       setStats({
         clients: Array.isArray(cl) ? cl.length : 0,
         cases: Array.isArray(ca) ? ca.filter(c => !["مغلقة","مكسوبة"].includes(c.status)).length : 0,
-        paid: Array.isArray(inv) ? inv.filter(i => i.status === "مدفوعة").reduce((s, i) => s + Number(i.amount || 0), 0) : 0,
         apts: Array.isArray(ap) ? ap.filter(a => a.status !== "ملغي").length : 0,
       });
       setRecentCases(Array.isArray(ca) ? ca.slice(0, 5) : []);
@@ -245,14 +244,13 @@ function Dashboard({ setNav, token }) {
         <h2 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: C.text }}>Bonjour, Maître Laadhar ⚖️</h2>
         <p style={{ margin: "4px 0 0", color: C.textLight, fontSize: 14 }}>Cabinet CML · البيانات محمية ومؤمّنة</p>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 22 }}>
         {[
           { label: "إجمالي العملاء", value: stats.clients, icon: "👥", color: C.p },
           { label: "القضايا النشطة", value: stats.cases, icon: "⚖️", color: C.amber },
-          { label: "المحصّل (د.ت)", value: stats.paid.toLocaleString(), icon: "💰", color: C.a },
           { label: "مواعيد قادمة", value: stats.apts, icon: "📅", color: C.green },
         ].map((k, i) => (
-          <Card key={i} style={{ padding: "20px 22px", borderTop: `4px solid ${k.color}`, cursor: "pointer" }} onClick={() => setNav(["clients","cases","invoices","calendar"][i])}>
+          <Card key={i} style={{ padding: "20px 22px", borderTop: `4px solid ${k.color}`, cursor: "pointer" }} onClick={() => setNav(["clients","cases","calendar"][i])}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <div>
                 <p style={{ margin: 0, fontSize: 11, color: C.textLight, fontWeight: 700 }}>{k.label}</p>
@@ -310,11 +308,129 @@ function Dashboard({ setNav, token }) {
 }
 
 /* ══════════════════════════════════════════
-   CLIENTS
+   CLIENTS — avec gestion des fichiers
 ══════════════════════════════════════════ */
+const DOC_TYPES = ["بطاقة هوية (CIN)","جواز سفر","رخصة سياقة","عقد","وثيقة قضائية","إشعار","تصريح","أخرى"];
+
+function ClientDetail({ client, token, onBack, onDelete }) {
+  const [docs, setDocs] = useState([]);
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [showDocForm, setShowDocForm] = useState(false);
+  const [docForm, setDocForm] = useState({ name: "", doc_type: "بطاقة هوية (CIN)", url: "", notes: "" });
+  const [tm, tt, show] = useToast();
+
+  useEffect(() => {
+    db.get("client_documents", token, `&client_id=eq.${client.id}`).then(d => {
+      if (Array.isArray(d)) setDocs(d);
+      setLoadingDocs(false);
+    });
+  }, [client.id]);
+
+  const addDoc = async () => {
+    if (!docForm.name) return;
+    const res = await db.post("client_documents", { client_id: client.id, ...docForm, uploaded_at: new Date().toISOString() }, token);
+    if (Array.isArray(res) && res[0]) { setDocs([res[0], ...docs]); show("✅ تم إضافة الوثيقة"); }
+    setShowDocForm(false); setDocForm({ name: "", doc_type: "بطاقة هوية (CIN)", url: "", notes: "" });
+  };
+
+  const removeDoc = async (id) => { await db.del("client_documents", id, token); setDocs(docs.filter(d => d.id !== id)); show("تم حذف الوثيقة"); };
+
+  const docTypeIcon = { "بطاقة هوية (CIN)":"🪪","جواز سفر":"📕","رخصة سياقة":"🚗","عقد":"📋","وثيقة قضائية":"⚖️","إشعار":"📩","تصريح":"📜","أخرى":"📎" };
+
+  return (
+    <div style={{ direction: "rtl" }}>
+      <Toast msg={tm} type={tt} />
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: C.pl, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif", marginBottom: 18 }}>← العودة إلى قائمة العملاء</button>
+
+      {/* Header */}
+      <Card style={{ padding: "22px 26px", marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => { if (window.confirm(`حذف العميل "${client.name}"؟`)) onDelete(client.id); }}
+              style={{ background: C.roseBg, border: "none", color: C.rose, padding: "8px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>🗑 حذف العميل</button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ textAlign: "right" }}>
+              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: C.text }}>{client.name}</h2>
+              <div style={{ display: "flex", gap: 12, marginTop: 5, flexWrap: "wrap" }}>
+                {client.phone && <span style={{ fontSize: 13, color: C.textMid }}>📞 {client.phone}</span>}
+                {client.email && <span style={{ fontSize: 13, color: C.textMid }}>📧 {client.email}</span>}
+                {client.city  && <span style={{ fontSize: 13, color: C.textMid }}>📍 {client.city}</span>}
+              </div>
+              <div style={{ marginTop: 8 }}><Badge label={client.status || "نشط"} /></div>
+            </div>
+            <Av name={client.name} size={56} bg={C.p} />
+          </div>
+        </div>
+      </Card>
+
+      {/* Documents */}
+      <Card style={{ padding: 22 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <button onClick={() => setShowDocForm(!showDocForm)}
+            style={{ background: `${C.p}12`, border: `1px solid ${C.p}30`, color: C.p, padding: "8px 16px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>
+            + إضافة وثيقة / ملف
+          </button>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: C.text }}>📂 الوثائق والملفات</h3>
+        </div>
+
+        {/* Formulaire ajout doc */}
+        {showDocForm && (
+          <div style={{ background: C.n100, borderRadius: 14, padding: "18px 20px", marginBottom: 18, border: `1.5px solid ${C.border}` }}>
+            <h4 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700, color: C.text, textAlign: "right" }}>إضافة وثيقة جديدة</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Inp label="اسم الوثيقة / الملف" required value={docForm.name} onChange={e => setDocForm({ ...docForm, name: e.target.value })} placeholder="مثال: CIN رقم 12345678" />
+              <Sel label="نوع الوثيقة" value={docForm.doc_type} onChange={e => setDocForm({ ...docForm, doc_type: e.target.value })} options={DOC_TYPES} />
+            </div>
+            <Inp label="رابط الملف (اختياري)" value={docForm.url} onChange={e => setDocForm({ ...docForm, url: e.target.value })} placeholder="https://drive.google.com/..." />
+            <Inp label="ملاحظات" value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} placeholder="ملاحظات اختيارية..." />
+            <div style={{ background: C.ab, borderRadius: 9, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: C.amber }}>
+              💡 لرفع ملفات حقيقية، استخدم Google Drive أو Dropbox وأضف الرابط هنا
+            </div>
+            <div style={{ display: "flex", gap: 10, flexDirection: "row-reverse" }}>
+              <Btn onClick={addDoc} disabled={!docForm.name}>💾 حفظ الوثيقة</Btn>
+              <Btn v="s" onClick={() => setShowDocForm(false)}>إلغاء</Btn>
+            </div>
+          </div>
+        )}
+
+        {/* Liste docs */}
+        {loadingDocs ? <Spinner /> : docs.length === 0 ? (
+          <Empty icon="📂" msg="لا توجد وثائق. أضف أول ملف للعميل!" />
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            {docs.map(doc => (
+              <div key={doc.id} style={{ background: C.n100, borderRadius: 13, padding: "14px 16px", border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <button onClick={() => removeDoc(doc.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "3px 8px", borderRadius: 6, fontSize: 10, cursor: "pointer", fontFamily: "Tajawal,sans-serif", flexShrink: 0 }}>حذف</button>
+                  <div style={{ textAlign: "right", flex: 1 }}>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: C.text }}>{docTypeIcon[doc.doc_type] || "📎"} {doc.name}</p>
+                    <span style={{ fontSize: 10, background: `${C.p}12`, color: C.p, padding: "2px 8px", borderRadius: 10, fontWeight: 700, display: "inline-block", marginTop: 4 }}>{doc.doc_type}</span>
+                  </div>
+                </div>
+                {doc.notes && <p style={{ margin: 0, fontSize: 12, color: C.textMid, textAlign: "right", fontStyle: "italic" }}>{doc.notes}</p>}
+                {doc.url && (
+                  <a href={doc.url} target="_blank" rel="noreferrer"
+                    style={{ display: "block", background: C.p, color: C.w, padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700, textAlign: "center", textDecoration: "none" }}>
+                    📎 فتح الملف ↗
+                  </a>
+                )}
+                <p style={{ margin: 0, fontSize: 10, color: C.textLight, textAlign: "right" }}>
+                  {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString("ar-TN") : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function Clients({ token }) {
   const [search, setSearch] = useState(""); const [showAdd, setShowAdd] = useState(false);
   const [clients, setClients] = useState([]); const [loading, setLoading] = useState(true);
+  const [selectedClient, setSelectedClient] = useState(null);
   const [tm, tt, show] = useToast();
   const [form, setForm] = useState({ name: "", email: "", phone: "", city: "", lawyer: "Mondher Laadhar" });
 
@@ -328,7 +444,20 @@ function Clients({ token }) {
     if (Array.isArray(res) && res[0]) { setClients([res[0], ...clients]); show("✅ تم إضافة العميل"); }
     setShowAdd(false); setForm({ name: "", email: "", phone: "", city: "", lawyer: "Mondher Laadhar" });
   };
-  const remove = async (id) => { await db.del("clients", id, token); setClients(clients.filter(c => c.id !== id)); show("تم الحذف"); };
+
+  const remove = async (id) => {
+    await db.del("clients", id, token);
+    setClients(clients.filter(c => c.id !== id));
+    setSelectedClient(null);
+    show("تم حذف العميل");
+  };
+
+  if (selectedClient) return (
+    <div>
+      <Toast msg={tm} type={tt} />
+      <ClientDetail client={selectedClient} token={token} onBack={() => setSelectedClient(null)} onDelete={remove} />
+    </div>
+  );
 
   return (
     <div style={{ direction: "rtl" }}>
@@ -350,17 +479,30 @@ function Clients({ token }) {
               </tr></thead>
               <tbody>
                 {filtered.map((c, i) => (
-                  <tr key={c.id} style={{ borderTop: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "12px 16px" }}>
+                  <tr key={c.id} style={{ borderTop: `1px solid ${C.border}`, cursor: "pointer", transition: "background 0.1s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.n100}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <td style={{ padding: "12px 16px" }} onClick={() => setSelectedClient(c)}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, flexDirection: "row-reverse" }}>
                         <Av name={c.name} size={34} bg={i % 2 === 0 ? C.p : C.amber} />
-                        <div style={{ textAlign: "right" }}><p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: C.text }}>{c.name}</p><p style={{ margin: 0, fontSize: 11, color: C.textLight }}>منذ {c.since}</p></div>
+                        <div style={{ textAlign: "right" }}>
+                          <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: C.text }}>{c.name}</p>
+                          <p style={{ margin: 0, fontSize: 11, color: C.textLight }}>منذ {c.since}</p>
+                        </div>
                       </div>
                     </td>
-                    <td style={{ padding: "12px 16px", textAlign: "right" }}><p style={{ margin: 0, fontSize: 12 }}>{c.phone}</p><p style={{ margin: 0, fontSize: 11, color: C.textLight }}>{c.email}</p></td>
-                    <td style={{ padding: "12px 16px", fontSize: 13, color: C.textMid, textAlign: "right" }}>{c.city}</td>
-                    <td style={{ padding: "12px 16px", textAlign: "right" }}><Badge label={c.status || "نشط"} /></td>
-                    <td style={{ padding: "12px 16px" }}><button onClick={() => remove(c.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "4px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>حذف</button></td>
+                    <td style={{ padding: "12px 16px", textAlign: "right" }} onClick={() => setSelectedClient(c)}>
+                      <p style={{ margin: 0, fontSize: 12 }}>{c.phone}</p>
+                      <p style={{ margin: 0, fontSize: 11, color: C.textLight }}>{c.email}</p>
+                    </td>
+                    <td style={{ padding: "12px 16px", fontSize: 13, color: C.textMid, textAlign: "right" }} onClick={() => setSelectedClient(c)}>{c.city}</td>
+                    <td style={{ padding: "12px 16px", textAlign: "right" }} onClick={() => setSelectedClient(c)}><Badge label={c.status || "نشط"} /></td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setSelectedClient(c)} style={{ background: `${C.p}12`, border: "none", color: C.p, padding: "5px 10px", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>📂 الملف</button>
+                        <button onClick={() => remove(c.id)} style={{ background: C.roseBg, border: "none", color: C.rose, padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", fontFamily: "Tajawal,sans-serif" }}>حذف</button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -875,42 +1017,92 @@ function AIAssistant() {
 function Analytics({ token }) {
   const [data, setData] = useState(null); const [loading, setLoading] = useState(true);
   useEffect(() => {
-    Promise.all([db.get("clients", token), db.get("cases", token), db.get("invoices", token)]).then(([cl, ca, inv]) => {
-      const clients = Array.isArray(cl) ? cl : []; const cases = Array.isArray(ca) ? ca : []; const invoices = Array.isArray(inv) ? inv : [];
-      const now = new Date();
-      const monthly = Array.from({ length: 6 }, (_, i) => {
-        const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-        const val = invoices.filter(iv => { if (!iv.created_at) return false; const id = new Date(iv.created_at); return id.getMonth() === d.getMonth() && id.getFullYear() === d.getFullYear() && iv.status === "مدفوعة"; }).reduce((s, x) => s + Number(x.amount || 0), 0);
-        return { month: ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"][d.getMonth()], val };
+    Promise.all([db.get("clients", token), db.get("cases", token)]).then(([cl, ca]) => {
+      const clients = Array.isArray(cl) ? cl : []; const cases = Array.isArray(ca) ? ca : [];
+      setData({
+        clients: clients.length, cases: cases.length,
+        won: cases.filter(c => c.status === "مكسوبة").length,
+        active: cases.filter(c => !["مغلقة","مكسوبة"].includes(c.status)).length,
+        byType: [
+          { label: "مدني",   value: cases.filter(c => c.type === "مدني").length,   color: C.p },
+          { label: "تجاري",  value: cases.filter(c => c.type === "تجاري").length,  color: C.a },
+          { label: "أسري",   value: cases.filter(c => c.type === "أسري").length,   color: C.amber },
+          { label: "جنائي",  value: cases.filter(c => c.type === "جنائي").length,  color: C.rose },
+          { label: "عمالي",  value: cases.filter(c => c.type === "عمالي").length,  color: C.purple },
+          { label: "إداري",  value: cases.filter(c => c.type === "إداري").length,  color: C.green },
+        ].filter(d => d.value > 0),
       });
-      const maxVal = Math.max(...monthly.map(m => m.val), 1);
-      setData({ clients: clients.length, cases: cases.length, won: cases.filter(c => c.status === "مكسوبة").length, totalPaid: invoices.filter(i => i.status === "مدفوعة").reduce((s, i) => s + Number(i.amount || 0), 0), monthly, maxVal });
       setLoading(false);
     });
   }, [token]);
   if (loading) return <Spinner />;
   if (!data) return null;
   const winRate = data.cases > 0 ? Math.round(data.won / data.cases * 100) : 0;
+  const maxType = Math.max(...data.byType.map(d => d.value), 1);
   return (
     <div style={{ direction: "rtl" }}>
       <div style={{ marginBottom: 22 }}><h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: C.text }}>التحليلات — Cabinet CML</h2></div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 22 }}>
-        {[{l:"إجمالي العملاء",v:data.clients,color:C.p,icon:"👥"},{l:"القضايا",v:data.cases,color:C.amber,icon:"⚖️"},{l:"تم التحصيل",v:`${data.totalPaid.toLocaleString()} د.ت`,color:C.a,icon:"💰"},{l:"معدل الفوز",v:`${winRate}%`,color:C.green,icon:"🏆"}].map((k,i)=>(
-          <Card key={i} style={{padding:"18px 20px",borderTop:`4px solid ${k.color}`}}><div style={{display:"flex",justifyContent:"space-between"}}><div><p style={{margin:0,fontSize:11,color:C.textLight,fontWeight:700}}>{k.l}</p><p style={{margin:"6px 0 0",fontSize:26,fontWeight:900,color:C.text}}>{k.v}</p></div><span style={{fontSize:24}}>{k.icon}</span></div></Card>
+        {[
+          {l:"إجمالي العملاء",v:data.clients,color:C.p,icon:"👥"},
+          {l:"القضايا النشطة",v:data.active,color:C.amber,icon:"⚖️"},
+          {l:"قضايا مكسوبة",v:data.won,color:C.green,icon:"🏆"},
+          {l:"معدل الفوز",v:`${winRate}%`,color:C.green,icon:"📊"},
+        ].map((k,i)=>(
+          <Card key={i} style={{padding:"18px 20px",borderTop:`4px solid ${k.color}`}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <div><p style={{margin:0,fontSize:11,color:C.textLight,fontWeight:700}}>{k.l}</p><p style={{margin:"6px 0 0",fontSize:26,fontWeight:900,color:C.text}}>{k.v}</p></div>
+              <span style={{fontSize:24}}>{k.icon}</span>
+            </div>
+          </Card>
         ))}
       </div>
-      <Card style={{ padding: 24 }}>
-        <h3 style={{ margin: "0 0 18px", fontSize: 15, fontWeight: 700, color: C.text }}>الإيراد الشهري (د.ت)</h3>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 160 }}>
-          {data.monthly.map((m, i) => (
-            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-              <span style={{ fontSize: 9, color: C.textLight }}>{m.val > 0 ? `${(m.val/1000).toFixed(1)}K` : ""}</span>
-              <div style={{ width: "100%", background: `linear-gradient(180deg,${C.pl},${C.p})`, borderRadius: "5px 5px 0 0", height: `${(m.val / data.maxVal) * 120}px`, minHeight: m.val > 0 ? 4 : 0 }} />
-              <span style={{ fontSize: 9, color: C.textMid }}>{m.month}</span>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
+        {/* Bar chart by type */}
+        <Card style={{ padding: 24 }}>
+          <h3 style={{ margin: "0 0 20px", fontSize: 15, fontWeight: 700, color: C.text }}>القضايا حسب النوع</h3>
+          {data.byType.length === 0 ? <Empty icon="⚖️" msg="لا توجد بيانات" /> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {data.byType.map((d, i) => (
+                <div key={i}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: d.color }}>{d.value} ({Math.round(d.value / data.cases * 100)}%)</span>
+                    <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{d.label}</span>
+                  </div>
+                  <div style={{ background: C.border, borderRadius: 4, height: 8 }}>
+                    <div style={{ width: `${(d.value / maxType) * 100}%`, height: "100%", background: d.color, borderRadius: 4, transition: "width 0.8s ease" }} />
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </Card>
+          )}
+        </Card>
+
+        {/* Status breakdown */}
+        <Card style={{ padding: 24 }}>
+          <h3 style={{ margin: "0 0 18px", fontSize: 15, fontWeight: 700, color: C.text }}>مؤشرات الجودة</h3>
+          {[
+            { name: "معدل الفوز", value: winRate, target: 80 },
+            { name: "القضايا المكسوبة", value: data.won, target: Math.max(data.cases, 1), isCount: true },
+            { name: "القضايا النشطة", value: data.active, target: Math.max(data.cases, 1), isCount: true },
+          ].map((ind, i) => {
+            const pct = ind.isCount ? Math.round(ind.value / ind.target * 100) : ind.value;
+            const col = pct >= ind.target && !ind.isCount ? C.green : pct >= 50 ? C.amber : C.rose;
+            return (
+              <div key={i} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: col }}>{ind.isCount ? ind.value : `${ind.value}%`}</span>
+                  <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{ind.name}</span>
+                </div>
+                <div style={{ background: C.border, borderRadius: 4, height: 8 }}>
+                  <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: col, borderRadius: 4, transition: "width 0.8s" }} />
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+      </div>
     </div>
   );
 }
@@ -1237,7 +1429,6 @@ export default function App() {
     { id: "clients",   label: "العملاء",      icon: "👥", adminOnly: false },
     { id: "cases",     label: "القضايا",      icon: "⚖️", adminOnly: false },
     { id: "calendar",  label: "الأجندة",      icon: "📅", adminOnly: false },
-    { id: "invoices",  label: "الفواتير",     icon: "📄", adminOnly: false },
     { id: "ai",        label: "المساعد الذكي",icon: "🤖", adminOnly: false },
     { id: "analytics", label: "التحليلات",    icon: "📊", adminOnly: false },
     { id: "access",    label: "إدارة الوصول", icon: "🔐", adminOnly: true },
@@ -1266,7 +1457,6 @@ export default function App() {
       case "clients":     return <Clients token={token} />;
       case "cases":       return <Cases token={token} />;
       case "calendar":    return <Calendar token={token} />;
-      case "invoices":    return <Invoices token={token} />;
       case "ai":          return <AIAssistant />;
       case "analytics":   return <Analytics token={token} />;
       case "access":      return <AccessPage token={token} />;
