@@ -50,11 +50,11 @@ const db = {
    RÔLES & PERMISSIONS
 ══════════════════════════════════════════ */
 const ROLES = {
-  admin:                 { label: "مدير", color: "#4A1528", pages: ["access", "assignments", "settings"] },
-  lawyer:                { label: "محامٍ", color: "#C9A84C", pages: ["dashboard","clients","cases","calendar","ai","analytics","settings"] },
-  collaborator:          { label: "متعاون", color: "#0D9488", pages: ["dashboard","clients","cases","calendar","ai","analytics","settings"] },
-  secretary_lawyer:      { label: "سكرتير محامٍ", color: "#7C3AED", pages: ["dashboard","clients","cases","calendar"] },
-  secretary_collaborator:{ label: "سكرتير متعاون", color: "#D97706", pages: ["dashboard","clients","cases","calendar"] },
+  admin:                 { label: "مدير",            color: "#4A1528", pages: ["settings","access","assignments"] },
+  lawyer:                { label: "محامٍ",            color: "#C9A84C", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
+  collaborator:          { label: "متعاون",           color: "#0D9488", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
+  secretary_lawyer:      { label: "سكرتير محامٍ",     color: "#7C3AED", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
+  secretary_collaborator:{ label: "سكرتير متعاون",    color: "#D97706", pages: ["dashboard","clients","cases","calendar","invoices","ai","analytics"] },
 };
 
 const canAccess = (role, page) => ROLES[role]?.pages.includes(page) ?? false;
@@ -1429,22 +1429,24 @@ export default function App() {
     { id: "clients",   label: "العملاء",      icon: "👥", adminOnly: false },
     { id: "cases",     label: "القضايا",      icon: "⚖️", adminOnly: false },
     { id: "calendar",  label: "الأجندة",      icon: "📅", adminOnly: false },
+    { id: "invoices",  label: "الفواتير",     icon: "📄", adminOnly: false },
     { id: "ai",        label: "المساعد الذكي",icon: "🤖", adminOnly: false },
     { id: "analytics", label: "التحليلات",    icon: "📊", adminOnly: false },
     { id: "access",    label: "إدارة الوصول", icon: "🔐", adminOnly: true },
     { id: "assignments",label:"إدارة الإسناد",icon: "📋", adminOnly: true },
-    { id: "settings",  label: "الإعدادات",    icon: "⚙️", adminOnly: false },
+    { id: "settings",  label: "الإعدادات",    icon: "⚙️", adminOnly: true },
   ];
 
   const visibleNav = ALL_NAV.filter(item => {
     if (item.adminOnly) return userRole === "admin";
+    if (userRole === "admin") return false; // admin sees only adminOnly pages
     return rolePages.includes(item.id);
   });
 
   // Redirection si page non autorisée
   useEffect(() => {
     if (token && !rolePages.includes(nav) && !(userRole === "admin" && ["access","assignments","settings"].includes(nav))) {
-      setNav(rolePages[0] || "dashboard");
+      setNav(userRole === "admin" ? "access" : rolePages[0] || "dashboard");
     }
   }, [nav, rolePages, userRole, token]);
 
@@ -1457,6 +1459,7 @@ export default function App() {
       case "clients":     return <Clients token={token} />;
       case "cases":       return <Cases token={token} />;
       case "calendar":    return <Calendar token={token} />;
+      case "invoices":    return <Invoices token={token} />;
       case "ai":          return <AIAssistant />;
       case "analytics":   return <Analytics token={token} />;
       case "access":      return <AccessPage token={token} />;
